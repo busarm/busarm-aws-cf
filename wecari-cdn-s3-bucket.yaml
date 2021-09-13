@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Content Delivery: Cloudfront Distribution with S3 Bucket as origin'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'S3 Properties'
+      Parameters:
+      - S3BucketName 
+      - S3WebsiteSupport
+      - S3ProtocolPolicy 
+      - S3DefaultRootObject
+      - S3CloudFrontOriginAccessIdentity
+    - Label:
+        default: 'Cloudfront Properties'
+      Parameters: 
+      - CacheDefaultTTL
+      - CacheMaxTTL
+      - CacheMinTTL
+      - Error403ResposeCode
+      - Error403ResposePagePath
+      - Error404ResposeCode
+      - Error404ResposePagePath
+    - Label:
+        default: 'Global Tags'
+      Parameters:
+      - ENV
+      - SYS
+Parameters:
+  S3BucketName:
+    Description: 'S3 Bucket Name'
+    Type: String 
+  S3WebsiteSupport:
+    Description: 'Enable if S3 Bucket is enabled for website access. If true, cdn will be configured to use website url as origin, else bucket domain name will be used'
+    Type: String 
+    Default: false
+    AllowedValues:
+    - true
+    - false
+  S3ProtocolPolicy:
+    Description: 'What protocol to connect to S3 with. http only, https only or same protocol as viewer'
+    Type: String 
+    Default: 'match-viewer'
+    AllowedValues:
+    - 'http-only'
+    - 'https-only'
+    - 'match-viewer'
+  S3DefaultRootObject:
+    Description: 'If S3 supports website access. Default root Object or path to object to be triggered on request if no object specified'
+    Type: String
+    Default: ''
+  S3CloudFrontOriginAccessIdentity:
+    Description: 'CloudFront Origin Access Identity for S3 to restrict access to S3 Origin to Cloudfront only'
+    Type: String 
+    Default: '' 
+
+
+  CacheDefaultTTL:
+    Description: 'Cache Default TTL in seconds'
+    Type: Number
+    Default: 3600
+    MinValue: 0
+  CacheMaxTTL:
+    Description: 'Cache Maximum TTL in seconds'
+    Type: Number
+    Default: 86400
+    MinValue: 0
+  CacheMinTTL:
+    Description: 'Cache Minimum TTL in seconds'
+    Type: Number
+    Default: 0
+    MinValue: 0
+
+  Error403ResposeCode:
+    Description: 'Response code to return when Cloudfront faces a 403 error. e.g 200'
+    Type: Number
+    Default: 403
+    MinValue: 0
+  Error403ResposePagePath:
+    Description: 'Page of page to redirect to when Cloudfront faces a 403 error. Must start with / . e.g /index.html for React or Angular apps hosted on an S3 Bucket with CloudFrontRead access'
+    Type: String
+    Default: '/403.html'
+
+  Error404ResposeCode:
+    Description: 'Response code to return when Cloudfront faces a 404 error. e.g 200'
+    Type: Number
+    Default: 404
+    MinValue: 0
+  Error404ResposePagePath:
+    Description: 'Page of page to redirect to when Cloudfront faces a 404 error. Must start with / . e.g /index.html for React or Angular apps'
+    Type: String
+    Default: '/404.html'
+
+  ENV:
+    Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
+    Type: String
+    Default: 'dev'
+    AllowedValues:
+    - 'dev'
+    - 'staging'
+    - 'prod'
+  SYS:
+    Description: 'Specify type System the resource is associated with this Resource (backend,frontend,both)'
+    Type: String
+    AllowedValues:
+    - 'backend'
+    - 'frontend'
+    - 'both'
+  
+Conditions:
+  HasS3WebsiteSupport: !Equals [!Ref S3WebsiteSupport, true]
+  HasNotS3WebsiteSupport: !Not [!Equals [!Ref S3WebsiteSupport, true]]
+  HasS3CloudFrontOriginAccessIdentity: !Not [!Equals [!Ref S3CloudFrontOriginAccessIdentity, '']]
+  HasS3DefaultRootObject: !Not [!Equals [!Ref S3DefaultRootObject, '']]
+
+Resources:
+  CloudFrontDistribution:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        DefaultRootObject: !If [HasS3DefaultRootObject, !Ref S3DefaultRootObject, !Ref 'AWS::NoValue'] 
+        Origins:
+        - DomainName: !If [HasS3WebsiteSupport, !Sub '${S3BucketName}.s3-website.${AWS::Region}.amazonaws.com', !Sub '${S3BucketName}.s3.amazonaws.com'] 
+          Id: s3-origin
+          CustomOriginConfig: !If [HasS3WebsiteSupport, {OriginProtocolPolicy: !Ref S3ProtocolPolicy, OriginReadTimeout: 60}, !Ref 'AWS::NoValue']
+          S3OriginConfig: !If [HasNotS3WebsiteSupport, {OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${S3CloudFrontOriginAccessIdentity}"}, !Ref 'AWS::NoValue']
+        DefaultCacheBehavior:
+          AllowedMethods:
+          - DELETE
+          - GET
+          - HEAD
+          - OPTIONS
+          - PATCH
+          - POST
+          - PUT
+          DefaultTTL: !Ref CacheDefaultTTL
+          MaxTTL: !Ref CacheMaxTTL
+          MinTTL: !Ref CacheMinTTL
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: all
+          TargetOriginId: s3-origin
+          ViewerProtocolPolicy: 'redirect-to-https'
+          Compress: true
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        PriceClass: 'PriceClass_All'
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'cdn-s3-bucket'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+
+  CloudFrontID:
+    Description: 'The ID of the CloudFront distribution.'
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontARN'
+  CloudFrontDomainName:
+    Description: 'The domain name of the CloudFront distribution.'
+    Value: !Sub ${CloudFrontDistribution.DomainName}
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDomainName'

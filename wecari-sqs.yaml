@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SQS: Create Queue'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentAlertStack
+Parameters:
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Type: String
+    Default: '' 
+Resources:
+  DeadLetterQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: !Sub '${AWS::StackName}-dlq'
+  Queue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: !Sub '${AWS::StackName}'
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        DeadLetterTargetArn: !GetAtt 'DeadLetterQueue.Arn'
+        MaxReceiveCount: 5
+
+  QueueTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Queue contains messages older than 10 minutes, messages are not consumed'
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateAgeOfOldestMessage
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 600
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: QueueName
+        Value: !GetAtt 'Queue.QueueName'
+      TreatMissingData: notBreaching
+      
+  DeadLetterQueueTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Dead letter queue contains messages, message processing failed'
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: QueueName
+        Value: !GetAtt 'DeadLetterQueue.QueueName'
+      TreatMissingData: notBreaching
+
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'sqs'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-StackName'
+  Queue:
+    Description: 'Queue'
+    Value: !Ref Queue
+    Export:
+      Name: !Sub '${AWS::StackName}-Queue'
+  QueueName:
+    Description: 'Queue Name'
+    Value: !GetAtt 'Queue.QueueName'
+    Export:
+      Name: !Sub '${AWS::StackName}-QueueName'
+  DeadLetterQueue:
+    Description: 'Dead Letter Queue'
+    Value: !Ref Queue
+    Export:
+      Name: !Sub '${AWS::StackName}-DeadLetterQueue'
+  DeadLetterQueueName:
+    Description: 'Dead Letter Queue Name'
+    Value: !GetAtt 'DeadLetterQueue.QueueName'
+    Export:
+      Name: !Sub '${AWS::StackName}-DeadLetterQueueName'

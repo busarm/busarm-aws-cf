@@ -1,0 +1,812 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Service for Laravel with Rolling Update Deployment'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentClusterStack
+      - ParentALBStack
+      - ParentAlertStack
+    - Label:
+        default: 'Load Balancer Parameters'
+      Parameters:
+      - LoadBalancerHostPattern
+      - LoadBalancerPath
+      - LoadBalancerHealthCheckPath
+      - LoadBalancerHttps
+      - LoadBalancerDeregistrationDelay
+    - Label:
+        default: 'Task Parameters'
+      Parameters:
+      - PHPAPPImage
+      - PHPAPPMemory
+      - PHPWorkspaceImage
+      - PHPWorkspaceMemory
+    - Label:
+        default: 'Service Parameters'
+      Parameters:
+      - UseOnlyHttps
+      - DesiredCount
+      - AutoScaling
+      - MaxCapacity
+      - MinCapacity
+      - HealthCheckGracePeriod
+
+Parameters:
+  ParentClusterStack:
+    Description: 'Stack name of parent Cluster stack based on wecari-ecs.yaml template.'
+    Type: String
+  ParentALBStack:
+    Description: 'Stack name of parent applicaiton load balancer stack based on wecari-alb.yaml template.'
+    Type: String 
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Type: String
+    Default: '' 
+  LoadBalancerHostPattern:
+    Description: 'Optional host pattern. Specify LoadBalancerPath and/or LoadBalancerHostPattern.'
+    Type: String
+    Default: ''
+    ConstraintDescription: 'Must not be longer than 255'
+    MaxLength: 255
+  LoadBalancerPath:
+    Description: 'Optional path part of the path pattern. E.g., for service, the path pattern will be /service*  Specify LoadBalancerPath and/or LoadBalancerHostPattern.'
+    Type: String
+    Default: 'service'
+    ConstraintDescription: 'Must not be longer than 255'
+    MaxLength: 255
+  LoadBalancerHealthCheckPath:
+    Description: 'Optional path in service to perform health check on.  E.g., for ping, the health check path will be /ping.'
+    Type: String
+    Default: 'ping'
+    ConstraintDescription: 'Must not be longer than 255'
+    MaxLength: 255
+  LoadBalancerHttps:
+    Description: 'If the cluster supports HTTPS (LoadBalancerCertificateArn is set) you can enable HTTPS for the service'
+    Type: String
+    Default: false
+    AllowedValues:
+    - true
+    - false
+  UseOnlyHttps:
+    Description: 'If LoadBalancerHttps = true. Make this true if you want to use only Https connection for your service'
+    Type: String
+    Default: false
+    AllowedValues:
+    - true
+    - false
+  LoadBalancerDeregistrationDelay:
+    Description: 'The amount time (in seconds) to wait before changing the state of a deregistering target from draining to unused.'
+    Type: Number
+    Default: 60
+    ConstraintDescription: 'Must be in the range [0-3600]'
+    MinValue: 0
+    MaxValue: 3600
+ 
+  PHPAPPImage:
+    Description: 'The Name of the APP image to use for a container, which is passed directly to the Docker daemon. You can use images in the Docker Hub registry or specify other repositories (repository-url/image:tag).'
+    Type: String
+
+  PHPAPPMemory:
+    Description: 'The maximum amount of memory to assign to the PHP APP container. Must be lower that the available memory of the Instance'
+    Type: Number
+    Default: 256
+    AllowedValues:
+    - 64
+    - 128
+    - 192
+    - 256
+    - 320
+    - 384
+    - 448
+    - 512
+    - 576
+    - 640
+    - 704
+    - 768
+    - 832
+    - 896
+    - 960
+    - 1024
+    - 1088
+    - 1152
+    - 1216
+    - 1280
+    - 1344
+    - 1408
+    - 1472
+    - 1536
+    - 1600
+    - 1664
+    - 1728
+    - 1792
+    - 1856
+    - 1920
+    - 1984
+    - 2048
+    - 2112
+    - 2176
+    - 2240
+    - 2304
+    - 2368
+    - 2432
+    - 2496
+    - 2560
+    - 2624
+    - 2688
+    - 2752
+    - 2816
+    - 2880
+    - 2944
+    - 3008
+    - 3072
+    - 3136
+    - 3200
+    - 3264
+    - 3328
+    - 3392
+    - 3456
+    - 3520
+    - 3584
+    - 3648
+    - 3712
+    - 3776
+    - 3840
+    - 3904
+    - 3968
+    - 4032
+    - 4096
+    - 4160
+    - 4224
+    - 4288
+    - 4352
+    - 4416
+    - 4480
+    - 4544
+    - 4608
+    - 4672
+    - 4736
+    - 4800
+    - 4864
+    - 4928
+    - 4992
+    - 5056
+    - 5120
+    - 5184
+    - 5248
+    - 5312
+    - 5376
+    - 5440
+    - 5504
+    - 5568
+    - 5632
+    - 5696
+    - 5760
+    - 5824
+    - 5888
+    - 5952
+    - 6016
+    - 6080
+    - 6144
+    - 6208
+    - 6272
+    - 6336
+    - 6400
+    - 6464
+    - 6528
+    - 6592
+    - 6656
+    - 6720
+    - 6784
+    - 6848
+    - 6912
+    - 6976
+    - 7040
+    - 7104
+    - 7168
+    - 7232
+    - 7296
+    - 7360
+    - 7424
+    - 7488
+    - 7552
+    - 7616
+    - 7680
+    - 7744
+    - 7808
+    - 7872
+    - 7936
+    - 8000
+    - 8064
+    - 8128
+    - 8192  
+  
+  DesiredCount:
+    Description: 'The number of simultaneous tasks, that you want to run on the cluster. CF will also expect the total number of services to reach this amount before completing deployment'
+    Type: Number
+    Default: 2
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+
+  PHPWorkspaceImage:
+    Description: 'The Name of the APP workspace image to use for a container, which is passed directly to the Docker daemon. You can use images in the Docker Hub registry or specify other repositories (repository-url/image:tag).'
+    Type: String
+
+  PHPWorkspaceMemory:
+    Description: 'The maximum amount of memory to assign to the PHP APP container. Must be lower that the available memory of the Instance'
+    Type: Number
+    Default: 256
+    AllowedValues:
+    - 64
+    - 128
+    - 192
+    - 256
+    - 320
+    - 384
+    - 448
+    - 512
+    - 576
+    - 640
+    - 704
+    - 768
+    - 832
+    - 896
+    - 960
+    - 1024
+    - 1088
+    - 1152
+    - 1216
+    - 1280
+    - 1344
+    - 1408
+    - 1472
+    - 1536
+    - 1600
+    - 1664
+    - 1728
+    - 1792
+    - 1856
+    - 1920
+    - 1984
+    - 2048
+    - 2112
+    - 2176
+    - 2240
+    - 2304
+    - 2368
+    - 2432
+    - 2496
+    - 2560
+    - 2624
+    - 2688
+    - 2752
+    - 2816
+    - 2880
+    - 2944
+    - 3008
+    - 3072
+    - 3136
+    - 3200
+    - 3264
+    - 3328
+    - 3392
+    - 3456
+    - 3520
+    - 3584
+    - 3648
+    - 3712
+    - 3776
+    - 3840
+    - 3904
+    - 3968
+    - 4032
+    - 4096
+    - 4160
+    - 4224
+    - 4288
+    - 4352
+    - 4416
+    - 4480
+    - 4544
+    - 4608
+    - 4672
+    - 4736
+    - 4800
+    - 4864
+    - 4928
+    - 4992
+    - 5056
+    - 5120
+    - 5184
+    - 5248
+    - 5312
+    - 5376
+    - 5440
+    - 5504
+    - 5568
+    - 5632
+    - 5696
+    - 5760
+    - 5824
+    - 5888
+    - 5952
+    - 6016
+    - 6080
+    - 6144
+    - 6208
+    - 6272
+    - 6336
+    - 6400
+    - 6464
+    - 6528
+    - 6592
+    - 6656
+    - 6720
+    - 6784
+    - 6848
+    - 6912
+    - 6976
+    - 7040
+    - 7104
+    - 7168
+    - 7232
+    - 7296
+    - 7360
+    - 7424
+    - 7488
+    - 7552
+    - 7616
+    - 7680
+    - 7744
+    - 7808
+    - 7872
+    - 7936
+    - 8000
+    - 8064
+    - 8128
+    - 8192  
+  
+  DesiredCount:
+    Description: 'The number of simultaneous tasks, that you want to run on the cluster. CF will also expect the total number of services to reach this amount before completing deployment'
+    Type: Number
+    Default: 2
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+
+  AutoScaling:
+    Description: 'Scale number of tasks based on CPU load?'
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  MaxCapacity:
+    Description: 'If AutoScaling = true. The maximum number of simultaneous tasks, that you want to run on the cluster.'
+    Type: Number
+    Default: 8
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+  MinCapacity:
+    Description: 'If AutoScaling = true. The minimum number of simultaneous tasks, that you want to run on the cluster.'
+    Type: Number
+    Default: 2
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1 
+  HealthCheckGracePeriod:
+    Description: 'The period of time, in seconds, that the Amazon ECS service scheduler ignores unhealthy Elastic Load Balancing target health checks after a task has first started.'
+    Type: Number
+    Default: 60
+    MinValue: 0
+    MaxValue: 1800
+    
+Conditions:
+  HasLoadBalancerHttps: !Equals [!Ref LoadBalancerHttps, 'true']
+  HasLoadBalancerPath: !Not [!Equals [!Ref LoadBalancerPath, '']]
+  HasLoadBalancerHostPattern: !Not [!Equals [!Ref LoadBalancerHostPattern, '']]
+  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
+  HasAutoScaling: !Equals [!Ref AutoScaling, 'true']
+  HasOnlyHttps: !And [!Equals [!Ref UseOnlyHttps, 'true'], !Condition HasLoadBalancerHttps]
+  HasNotOnlyHttps: !Not [!Condition HasOnlyHttps]
+
+Resources:
+   
+  # ECS Service ALB Target Group
+  ECSServiceLoadBalancerTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 60
+      HealthCheckPath: !Sub '/${LoadBalancerHealthCheckPath}'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 4
+      Matcher:
+        HttpCode: '200-499'
+      Port: 80
+      Protocol: HTTP
+      VpcId: {'Fn::ImportValue': !Sub '${ParentClusterStack}-VPC'}
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: !Ref LoadBalancerDeregistrationDelay
+
+  # ALB Listener Rules
+  LoadBalancerHttpListenerRule: # HTTP
+    Condition: HasNotOnlyHttps
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      ListenerArn: {'Fn::ImportValue': !Sub '${ParentALBStack}-HttpListener'}
+      Priority: 1
+      Actions:
+      - Type: forward
+        TargetGroupArn: !Ref ECSServiceLoadBalancerTargetGroup
+      Conditions: !If
+      - HasLoadBalancerPath
+      - !If
+        - HasLoadBalancerHostPattern
+        - - Field: host-header
+            Values:
+            - !Ref LoadBalancerHostPattern
+          - Field: path-pattern
+            Values:
+            - !Sub '/${LoadBalancerPath}*'
+        - - Field: path-pattern
+            Values:
+            - !Sub '/${LoadBalancerPath}*'
+      - !If
+        - HasLoadBalancerHostPattern
+        - - Field: host-header
+            Values:
+            - !Ref LoadBalancerHostPattern
+        - - Field: path-pattern
+            Values:
+            - '*'
+
+  LoadBalancerHttpsListenerRule: # HTTPS
+    Condition: HasLoadBalancerHttps
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      ListenerArn: {'Fn::ImportValue': !Sub '${ParentALBStack}-HttpsListener'}
+      Priority: 1
+      Actions:
+      - Type: forward
+        TargetGroupArn: !Ref ECSServiceLoadBalancerTargetGroup
+      Conditions: !If
+      - HasLoadBalancerPath
+      - !If
+        - HasLoadBalancerHostPattern
+        - - Field: host-header
+            Values:
+            - !Ref LoadBalancerHostPattern
+          - Field: path-pattern
+            Values:
+            - !Sub '/${LoadBalancerPath}*'
+        - - Field: path-pattern
+            Values:
+            - !Sub '/${LoadBalancerPath}*'
+      - !If
+        - HasLoadBalancerHostPattern
+        - - Field: host-header
+            Values:
+            - !Ref LoadBalancerHostPattern
+        - - Field: path-pattern
+            Values:
+            - '*'
+  
+  # ECS Service Task Definition
+  DefaultTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Ref 'AWS::StackName'
+      NetworkMode: bridge
+      Volumes:
+      - Name: php-app
+        DockerVolumeConfiguration:
+          Scope: task
+          Driver: local
+      ContainerDefinitions:
+      # App Container
+      - Name: !Ref PHPAPPImage # if you change this, you also must change the AWS::ECS::Service
+        Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${PHPAPPImage}
+        Memory: !Ref PHPAPPMemory
+        Essential: true 
+        PortMappings:
+        - ContainerPort: 80 # if you change this, you also must change the AWS::ECS::Service
+          HostPort: 0 # 0 For Dynamic port mapping, needed to allow running multiple tasks
+          Protocol: tcp 
+        MountPoints:
+        - SourceVolume: 'php-app'
+          ContainerPath: '/var/www'
+        HealthCheck:
+          Command: 
+            - "CMD"
+            - "curl"
+            - "-f"
+            - "http://localhost"
+          Interval: 10
+          Retries: 3
+          StartPeriod: 30
+          Timeout: 30
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            'awslogs-region': !Ref 'AWS::Region'
+            'awslogs-group': {'Fn::ImportValue': !Sub '${ParentClusterStack}-LogGroup'}
+            'awslogs-stream-prefix': !Sub '${AWS::StackName}' 
+      
+      # App Workspace Container
+      - Name: !Ref PHPWorkspaceImage
+        Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${PHPWorkspaceImage}
+        Memory: !Ref PHPWorkspaceMemory
+        Essential: true 
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: !Ref PHPAPPImage
+        Links:
+        - !Ref PHPAPPImage
+        PortMappings:
+        - ContainerPort: 22 # if you change this, you also must change the AWS::ECS::Service
+          HostPort: 0 # 0 For Dynamic port mapping, needed to allow running multiple tasks
+          Protocol: tcp 
+        MountPoints:
+        - SourceVolume: 'php-app'
+          ContainerPath: '/var/www'
+        HealthCheck:
+          Command: 
+            - "CMD-SHELL"
+            - "echo"
+            - "started"
+          Interval: 10
+          Retries: 3
+          StartPeriod: 30
+          Timeout: 30
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            'awslogs-region': !Ref 'AWS::Region'
+            'awslogs-group': {'Fn::ImportValue': !Sub '${ParentClusterStack}-LogGroup'}
+            'awslogs-stream-prefix': !Sub '${AWS::StackName}' 
+
+  # ECS Service  
+  Service:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      Cluster: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50 
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: !Ref DesiredCount
+      HealthCheckGracePeriodSeconds: !Ref HealthCheckGracePeriod 
+      PlacementStrategies:
+      - Type: spread
+        Field: 'attribute:ecs.availability-zone'
+      - Type: spread
+        Field: instanceId
+      SchedulingStrategy: REPLICA
+      TaskDefinition: !Ref DefaultTaskDefinition
+      LoadBalancers: 
+      - ContainerName: !Ref PHPAPPImage
+        ContainerPort: 80
+        TargetGroupArn: !Ref ECSServiceLoadBalancerTargetGroup 
+        
+  # ECS Service Alarms and Notification
+  CPUUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      - Name: ServiceName
+        Value: !GetAtt 'Service.Name'
+      MetricName: CPUUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+
+  MemoryUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average Memory utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      - Name: ServiceName
+        Value: !GetAtt 'Service.Name'
+      MetricName: MemoryUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+
+  ServiceFailedNotification:
+    Condition: HasAlertTopic
+    Type: 'AWS::Events::Rule'
+    Properties:
+      EventPattern:
+        source:
+        - 'aws.ec2'
+        'detail-type':
+        - 'ECS Service Action'
+        resources:
+        - !Ref Service
+        detail:
+          eventType:
+          - ERROR
+          - WARN
+      State: ENABLED
+      Targets:
+      - Arn: {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+        Id: rule
+  
+  # Service Auto Scaling
+  ScalableTargetRole: # based on http://docs.aws.amazon.com/AmazonECS/latest/developerguide/autoscale_IAM_role.html
+    Condition: HasAutoScaling
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: 'application-autoscaling.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Policies:
+      - PolicyName: ecs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'ecs:DescribeServices'
+            - 'ecs:UpdateService'
+            Resource: '*'
+      - PolicyName: cloudwatch
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'cloudwatch:DescribeAlarms'
+            Resource: '*'
+
+  ScalableTarget:
+    Condition: HasAutoScaling
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    Properties:
+      MaxCapacity: !Ref MaxCapacity
+      MinCapacity: !Ref MinCapacity
+      ResourceId: !Sub
+      - 'service/${Cluster}/${Service}'
+      - Cluster: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+        Service: !GetAtt 'Service.Name'
+      RoleARN: !GetAtt 'ScalableTargetRole.Arn'
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  ScaleUpPolicy:
+    Condition: HasAutoScaling
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub '${AWS::StackName}-scale-up'
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: PercentChangeInCapacity
+        Cooldown: 300
+        MinAdjustmentMagnitude: 1
+        StepAdjustments:
+        - MetricIntervalLowerBound: 0
+          ScalingAdjustment: 25
+
+  ScaleDownPolicy:
+    Condition: HasAutoScaling
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub '${AWS::StackName}-scale-down'
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: PercentChangeInCapacity
+        Cooldown: 300
+        MinAdjustmentMagnitude: 1
+        StepAdjustments:
+        - MetricIntervalUpperBound: 0
+          ScalingAdjustment: -25
+  
+  # CPU Utilization
+  CPUUtilizationHighAlarm:
+    Condition: HasAutoScaling
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Service is running out of CPU'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      - Name: ServiceName
+        Value: !GetAtt 'Service.Name'
+      MetricName: CPUUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - !Ref ScaleUpPolicy
+      
+  CPUUtilizationLowAlarm:
+    Condition: HasAutoScaling
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Service is wasting CPU'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      - Name: ServiceName
+        Value: !GetAtt 'Service.Name'
+      MetricName: CPUUtilization
+      ComparisonOperator: LessThanThreshold
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 20
+      AlarmActions:
+      - !Ref ScaleDownPolicy
+
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'ecs-service-php'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-StackName' 
+  Service:
+    Description: 'ECS Service'
+    Value: !GetAtt Service.Name
+    Export:
+      Name: !Sub '${AWS::StackName}-Service'
+  ServiceTargetGroup:
+    Description: 'ECS Service Load balancer Target Group'
+    Value: !Ref ECSServiceLoadBalancerTargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceTargetGroup' 
+  TaskDefinition:
+    Description: 'ECS Service TaskDefinition'
+    Value: !Ref DefaultTaskDefinition
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinition'
+  DNSName:
+    Description: 'The DNS name for the ECS cluster/service load balancer.'
+    Value: {'Fn::ImportValue': !Sub '${ParentALBStack}-DNSName'}
+    Export:
+      Name: !Sub '${AWS::StackName}-DNSName'
+  URL:
+    Description: 'URL to the ECS service.' # TODO does not work with LoadBalancerHostPattern
+    Value: !Sub
+    - '${ClusterURL}/${LoadBalancerPath}/'
+    - ClusterURL: {'Fn::ImportValue': !Sub '${ParentALBStack}-URL'}
+      LoadBalancerPath: !Ref LoadBalancerPath
+    Export:
+      Name: !Sub '${AWS::StackName}-URL'

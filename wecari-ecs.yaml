@@ -1,0 +1,1463 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Cluster in an Auto Scaling Group'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentVPCStack
+      - ParentALBStack
+      - ParentSSHBastionStack
+      - ParentAlertStack
+    - Label:
+        default: 'EC2 Parameters'
+      Parameters:
+      - KeyName
+      - IAMUserSSHAccess
+      - SystemsManagerAccess
+      - ManagedPolicyArns
+    - Label:
+        default: 'Cluster Parameters'
+      Parameters:
+      - AZA
+      - AZB
+      - SubnetsReach
+      - InstanceType
+      - LogsRetentionInDays
+      - DesiredCapacity
+      - MinSize
+      - MaxSize
+      - DrainingTimeoutInSeconds
+      - StopContainerTimeoutInSeconds
+      - AutoScaleScheduleStart 
+      - AutoScaleScheduleStop
+    - Label:
+        default: 'Cluster Scaling Parameters'
+      Parameters:
+      - ContainerMaxCPU
+      - ContainerMaxMemory
+      - ContainerShortageThreshold
+      - ContainerExcessThreshold
+    - Label:
+        default: 'Logz.io'
+      Parameters:
+      - LogzioToken
+      - LogzioRegion
+    - Label:
+        default: 'Global Tags'
+      Parameters:
+      - ENV
+      - SYS
+Parameters:
+  ParentVPCStack:
+    Description: 'Stack name of parent VPC stack based on wecari-vpc.yaml template.'
+    Type: String
+  ParentALBStack:
+    Description: 'Stack name of parent applicaiton load balancer stack based on wecari-alb.yaml template.'
+    Type: String 
+  ParentSSHBastionStack:
+    Description: 'Optional but recommended stack name of parent SSH bastion host/instance stack based on pxlr-bastion.yaml template.'
+    Type: String
+    Default: ''
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Type: String
+    Default: ''
+  KeyName:
+    Description: 'Optional key pair of the ec2-user to establish a SSH connection to the EC2 instances of the ECS cluster.'
+    Type: String
+    Default: ''
+  IAMUserSSHAccess:
+    Description: 'Synchronize public keys of IAM users to enable personalized SSH access (Doc: https://cloudonaut.io/manage-aws-ec2-ssh-access-with-iam/).'
+    Type: String
+    Default: false
+    AllowedValues:
+    - true
+    - false
+  SystemsManagerAccess:
+    Description: 'Enable AWS Systems Manager agent and authorization.'
+    Type: String
+    Default: true
+    AllowedValues:
+    - true
+    - false
+  ManagedPolicyArns:
+    Description: 'Optional comma-delimited list of IAM managed policy ARNs to attach to the instance''s IAM role'
+    Type: String
+    Default: ''
+
+  AZA:
+    Description: 'Use Availability Zone A (Choose at least one AZ)'
+    Type: String
+    Default: true
+    AllowedValues:
+    - true
+    - false
+  AZB:
+    Description: 'Use Availability Zone B (Choose at least one AZ)'
+    Type: String
+    Default: true
+    AllowedValues:
+    - true
+    - false
+  SubnetsReach:
+    Description: 'Should the cluster have direct access to the Internet or do you prefer private subnets with NAT?'
+    Type: String
+    Default: Private
+    AllowedValues:
+    - Public
+    - Private 
+  InstanceType:
+    Description: 'The instance type of the EC2 instances of the ECS cluster.'
+    Type: String
+    Default: 't3.micro'
+  LogsRetentionInDays:
+    Description: 'Specifies the number of days you want to retain log events in the specified log group.'
+    Type: Number
+    Default: 14
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
+
+  DesiredCapacity:
+    Description: 'Desired number of Instances in the Auto Scaling Group'
+    Type: Number
+    Default: 1
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+  MinSize:
+    Description: 'The minimum size of Instances in the Auto Scaling group.'
+    Type: Number
+    Default: 1
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+  MaxSize:
+    Description: 'The maximum size of Instances in the Auto Scaling group.'
+    Type: Number
+    Default: 4
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+
+  DrainingTimeoutInSeconds:
+    Description: 'Maximum time in seconds an EC2 instance waits when terminating until all containers are moved to another EC2 instance (draining).'
+    Type: Number
+    Default: 300 # 5 minutes
+    ConstraintDescription: 'Must be in the range [60-86400]'
+    MinValue: 60
+    MaxValue: 86400 # 24 hours
+  StopContainerTimeoutInSeconds:
+    Description: 'Time in seconds the ECS agent waits before killing a stopped container (see ECS_CONTAINER_STOP_TIMEOUT).'
+    Type: Number
+    Default: 300
+    ConstraintDescription: 'Must be in the range [30-3600]'
+    MinValue: 30
+    MaxValue: 3600
+  AutoScaleScheduleStart:
+    Description: 'Optional cron scheduler for when to start instances in ASG. e.g "0 8 * * MON-FRI" 8 am UTC every week day'
+    Type: String
+    Default: ''
+  AutoScaleScheduleStop:
+    Description: 'Optional cron scheduler for when to stop instances in ASG. e.g "0 22 * * *" 10 pm UTC every day'
+    Type: String
+    Default: ''
+
+  ContainerMaxCPU:
+    Description: 'The maximum number of cpu reservation per container that you plan to run on this cluster. A container instance has 1,024 CPU units for every CPU core.'
+    Type: Number
+    Default: 128
+  ContainerMaxMemory:
+    Description: 'The maximum number of memory reservation (in MB)  per container that you plan to run on this cluster.'
+    Type: Number
+    Default: 256
+  ContainerShortageThreshold:
+    Description: 'Scale up if free cluster capacity <= containers (based on ContainerMaxCPU and ContainerMaxMemory settings)'
+    Type: Number
+    Default: 2
+    MinValue: 0
+    ConstraintDescription: 'Must be >= 0'
+  ContainerExcessThreshold:
+    Description: 'Scale down if free cluster capacity >= containers (based on ContainerMaxCPU and ContainerMaxMemory settings)'
+    Type: Number
+    Default: 4
+    MinValue: 2
+    ConstraintDescription: 'Must be >= 2'
+
+  LogzioToken:
+    Description: 'Required if you want to enable Logz.io logs and metrics collection. Your Logz.io account token. Replace <ACCOUNT-TOKEN> with the token of the account you want to ship to.'
+    Type: String
+    Default: ''
+    NoEcho: true
+
+  LogzioRegion:
+    Description: 'Default: US region. Logz.io region code to ship the logs to. This region code changes depending on the region your account is hosted in. For example, accounts in the EU region have region code eu. For more information, see Account region on the Logz.io Docs.'
+    Type: String
+    Default: ''
+
+  ENV:
+    Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
+    Type: String
+    Default: 'dev'
+    AllowedValues:
+    - 'dev'
+    - 'staging'
+    - 'prod'
+  SYS:
+    Description: 'Specify type System the resource is associated with this Resource (backend,frontend,both)'
+    Type: String
+    AllowedValues:
+    - 'backend'
+    - 'frontend'
+    - 'both'
+Mappings:
+  RegionMap:
+    'af-south-1':
+      ECSAMI: 'ami-014cd30fc155402d8'
+    'eu-north-1':
+      ECSAMI: 'ami-015b157d082fd4e0d'
+    'ap-south-1':
+      ECSAMI: 'ami-078902ae8103daac8'
+    'eu-west-3':
+      ECSAMI: 'ami-0182381900083ba64'
+    'eu-west-2':
+      ECSAMI: 'ami-037dd70536680c11f'
+    'eu-south-1':
+      ECSAMI: 'ami-0d8d6b2f35b76a858'
+    'eu-west-1':
+      ECSAMI: 'ami-0489c3efb4fe85f5d'
+    'ap-northeast-2':
+      ECSAMI: 'ami-0cfc5eb79eceeeec9'
+    'me-south-1':
+      ECSAMI: 'ami-09ce7408677f51598'
+    'ap-northeast-1':
+      ECSAMI: 'ami-06ee72c3360fd7fad'
+    'sa-east-1':
+      ECSAMI: 'ami-05313c3a9e9148109'
+    'ca-central-1':
+      ECSAMI: 'ami-0a06b44c462364156'
+    'ap-east-1':
+      ECSAMI: 'ami-04eb26ad59fec6a8b'
+    'ap-southeast-1':
+      ECSAMI: 'ami-09dd721a797640468'
+    'ap-southeast-2':
+      ECSAMI: 'ami-040bd2e2325535b3d'
+    'eu-central-1':
+      ECSAMI: 'ami-09509e8f8dea8ab83'
+    'us-east-1':
+      ECSAMI: 'ami-0c1f575380708aa63'
+    'us-east-2':
+      ECSAMI: 'ami-015a2afe7e1a8af56'
+    'us-west-1':
+      ECSAMI: 'ami-032a827d612b78a50'
+    'us-west-2':
+      ECSAMI: 'ami-05edb14e89a5b98f3'
+Conditions:
+  HasAZA: !Equals [!Ref AZA, 'true']
+  HasAZB: !Equals [!Ref AZB, 'true']
+  HasKeyName: !Not [!Equals [!Ref KeyName, '']]
+  HasIAMUserSSHAccess: !Equals [!Ref IAMUserSSHAccess, 'true']
+  HasSystemsManagerAccess: !Equals [!Ref SystemsManagerAccess, 'true']
+  HasSSHBastionSecurityGroup: !Not [!Equals [!Ref ParentSSHBastionStack, '']]
+  HasNotSSHBastionSecurityGroup: !Equals [!Ref ParentSSHBastionStack, ''] 
+  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
+  HasManagedPolicyArns: !Not [!Equals [!Ref ManagedPolicyArns, '']]
+  HasAutoScaleScheduleStart: !Not [!Equals [!Ref AutoScaleScheduleStart, '']]
+  HasAutoScaleScheduleStop: !Not [!Equals [!Ref AutoScaleScheduleStop, '']]
+  HasLogzio: !Not [!Equals [!Ref LogzioToken, '']]
+  
+Resources:
+
+  # Create ECS Cluster
+  Cluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties: 
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+
+  # Log Group
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: !Ref LogsRetentionInDays
+  
+  # EC2 Instance Profile
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+      - !Ref Role
+
+  # IAM ROLE for EC2
+  Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: 'ec2.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      ManagedPolicyArns: !If [HasManagedPolicyArns, !Split [',', !Ref ManagedPolicyArns], !Ref 'AWS::NoValue']
+      Policies:
+      - !If
+        - HasSystemsManagerAccess
+        - PolicyName: ssm
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - 'ssmmessages:*' # SSM Agent by https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-setting-up-messageAPIs.html
+              - 'ssm:UpdateInstanceInformation' # SSM agent by https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-setting-up-messageAPIs.html
+              - 'ec2messages:*' # SSM Session Manager by https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-setting-up-messageAPIs.html
+              Resource: '*'
+        - !Ref 'AWS::NoValue'
+      - PolicyName: ecs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'ecs:DiscoverPollEndpoint'
+            Resource: '*'
+      - PolicyName: ecs-cluster
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'ecs:RegisterContainerInstance'
+            - 'ecs:SubmitContainerStateChange'
+            - 'ecs:SubmitTaskStateChange'
+            - 'ecs:ListContainerInstances'
+            Resource: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${Cluster}'
+      - PolicyName: ecs-cluster-instance
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'ecs:Poll'
+            - 'ecs:StartTelemetrySession'
+            - 'ecs:UpdateContainerInstancesState'
+            - 'ecs:ListTasks'
+            - 'ecs:DescribeContainerInstances'
+            Resource: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/*'
+            Condition:
+              'StringEquals':
+                'ecs:cluster':
+                  !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${Cluster}'
+      - PolicyName: ecr
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'ecr:GetAuthorizationToken'
+            - 'ecr:BatchCheckLayerAvailability'
+            - 'ecr:GetDownloadUrlForLayer'
+            - 'ecr:BatchGetImage'
+            Resource: '*'
+      - PolicyName: logs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'logs:CreateLogGroup'
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+            - 'logs:DescribeLogStreams'
+            Resource: !GetAtt 'LogGroup.Arn'
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+  
+  # Allow SSH access from IAM users
+  IAMPolicySSHAccess:
+    Type: 'AWS::IAM::Policy'
+    Condition: HasIAMUserSSHAccess
+    Properties:
+      Roles:
+      - !Ref Role
+      PolicyName: 'iam-ssh'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - 'iam:ListUsers'
+          Resource:
+          - '*'
+        - Effect: Allow
+          Action:
+          - 'iam:ListSSHPublicKeys'
+          - 'iam:GetSSHPublicKey'
+          Resource:
+          - !Sub 'arn:aws:iam::${AWS::AccountId}:user/*'
+
+  # EC2 Security Group
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'ECS Cluster tcp traffic from withing vpc'
+      VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
+      SecurityGroupIngress:
+      - SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-SecurityGroup'}
+        FromPort: 0
+        ToPort: 65535
+        IpProtocol: tcp
+      - SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentALBStack}-SecurityGroup'}
+        FromPort: 0
+        ToPort: 65535
+        IpProtocol: tcp
+
+
+  # Bastion Host Security Group 
+  SecurityGroupInSSHBastion:  # Allow SSH for Bastion Host only if availble
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Condition: HasSSHBastionSecurityGroup
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentSSHBastionStack}-SecurityGroup'}
+
+  SecurityGroupInSSHWorld: # Allow SSH for everyone if no Bastion Host avialable
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Condition: HasNotSSHBastionSecurityGroup
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: '0.0.0.0/0'
+
+  # Create Launch Configuration for Auto Scaling Group
+  LaunchConfiguration:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Metadata:
+      'AWS::CloudFormation::Init':
+        configSets:
+          default: !If [HasIAMUserSSHAccess, [awslogs, ssh-access, install], [awslogs, install]]
+        awslogs:
+          packages:
+            yum:
+              awslogs: []
+          files:
+            '/etc/awslogs/awscli.conf':
+              content: !Sub |
+                [default]
+                region = ${AWS::Region}
+                [plugins]
+                cwlogs = cwlogs
+              mode: '000644'
+              owner: root
+              group: root
+            '/etc/awslogs/awslogs.conf':
+              content: !Sub |
+                [general]
+                state_file = /var/lib/awslogs/agent-state
+                [/var/log/amazon/ssm/amazon-ssm-agent.log]
+                datetime_format = %Y-%m-%d %H:%M:%S
+                file = /var/log/amazon/ssm/amazon-ssm-agent.log
+                log_stream_name = {instance_id}/var/log/amazon/ssm/amazon-ssm-agent.log
+                log_group_name = ${LogGroup}
+                [/var/log/amazon/ssm/errors.log]
+                datetime_format = %Y-%m-%d %H:%M:%S
+                file = /var/log/amazon/ssm/errors.log
+                log_stream_name = {instance_id}/var/log/amazon/ssm/errors.log
+                log_group_name = ${LogGroup}
+                [/var/log/audit/audit.log]
+                file = /var/log/audit/audit.log
+                log_stream_name = {instance_id}/var/log/audit/audit.log
+                log_group_name = ${LogGroup}
+                [/var/log/awslogs.log]
+                datetime_format = %Y-%m-%d %H:%M:%S
+                file = /var/log/awslogs.log
+                log_stream_name = {instance_id}/var/log/awslogs.log
+                log_group_name = ${LogGroup}
+                [/var/log/boot.log]
+                file = /var/log/boot.log
+                log_stream_name = {instance_id}/var/log/boot.log
+                log_group_name = ${LogGroup}
+                [/var/log/cfn-hup.log]
+                datetime_format = %Y-%m-%d %H:%M:%S
+                file = /var/log/cfn-hup.log
+                log_stream_name = {instance_id}/var/log/cfn-hup.log
+                log_group_name = ${LogGroup}
+                [/var/log/cfn-init-cmd.log]
+                datetime_format = %Y-%m-%d %H:%M:%S
+                file = /var/log/cfn-init-cmd.log
+                log_stream_name = {instance_id}/var/log/cfn-init-cmd.log
+                log_group_name = ${LogGroup}
+                [/var/log/cfn-init.log]
+                datetime_format = %Y-%m-%d %H:%M:%S
+                file = /var/log/cfn-init.log
+                log_stream_name = {instance_id}/var/log/cfn-init.log
+                log_group_name = ${LogGroup}
+                [/var/log/cfn-wire.log]
+                datetime_format = %Y-%m-%d %H:%M:%S
+                file = /var/log/cfn-wire.log
+                log_stream_name = {instance_id}/var/log/cfn-wire.log
+                log_group_name = ${LogGroup}
+                [/var/log/cloud-init-output.log]
+                file = /var/log/cloud-init-output.log
+                log_stream_name = {instance_id}/var/log/cloud-init-output.log
+                log_group_name = ${LogGroup}
+                [/var/log/cloud-init.log]
+                datetime_format = %b %d %H:%M:%S
+                file = /var/log/cloud-init.log
+                log_stream_name = {instance_id}/var/log/cloud-init.log
+                log_group_name = ${LogGroup}
+                [/var/log/cron]
+                datetime_format = %b %d %H:%M:%S
+                file = /var/log/cron
+                log_stream_name = {instance_id}/var/log/cron
+                log_group_name = ${LogGroup}
+                [/var/log/dmesg]
+                file = /var/log/dmesg
+                log_stream_name = {instance_id}/var/log/dmesg
+                log_group_name = ${LogGroup}
+                [/var/log/grubby_prune_debug]
+                file = /var/log/grubby_prune_debug
+                log_stream_name = {instance_id}/var/log/grubby_prune_debug
+                log_group_name = ${LogGroup}
+                [/var/log/maillog]
+                datetime_format = %b %d %H:%M:%S
+                file = /var/log/maillog
+                log_stream_name = {instance_id}/var/log/maillog
+                log_group_name = ${LogGroup}
+                [/var/log/messages]
+                datetime_format = %b %d %H:%M:%S
+                file = /var/log/messages
+                log_stream_name = {instance_id}/var/log/messages
+                log_group_name = ${LogGroup}
+                [/var/log/secure]
+                datetime_format = %b %d %H:%M:%S
+                file = /var/log/secure
+                log_stream_name = {instance_id}/var/log/secure
+                log_group_name = ${LogGroup}
+                [/var/log/yum.log]
+                datetime_format = %b %d %H:%M:%S
+                file = /var/log/yum.log
+                log_stream_name = {instance_id}/var/log/yum.log
+                log_group_name = ${LogGroup}
+              mode: '000644'
+              owner: root
+              group: root
+            '/etc/awslogs/config/ecs.conf':
+              content: !Sub |
+                [/var/log/ecs/ecs-init.log]
+                file = /var/log/ecs/ecs-init.log
+                log_stream_name = {instance_id}/var/log/ecs/ecs-init.log
+                log_group_name = ${LogGroup}
+                datetime_format = %Y-%m-%dT%H:%M:%SZ
+                [/var/log/ecs/ecs-agent.log]
+                file = /var/log/ecs/ecs-agent.log
+                log_stream_name = {instance_id}/var/log/ecs/ecs-agent.log
+                log_group_name = ${LogGroup}
+                datetime_format = %Y-%m-%dT%H:%M:%SZ
+              mode: '000644'
+              owner: root
+              group: root
+          services:
+            sysvinit:
+              awslogsd:
+                enabled: true
+                ensureRunning: true
+                packages:
+                  yum:
+                  - awslogs
+                files:
+                - '/etc/awslogs/awslogs.conf'
+                - '/etc/awslogs/awscli.conf'
+                - '/etc/awslogs/config/ecs.conf'
+        ssh-access:
+          files:
+            '/opt/authorized_keys_command.sh':
+              content: |
+                #!/bin/bash -e
+                if [ -z "$1" ]; then
+                  exit 1
+                fi
+                UnsaveUserName="$1"
+                UnsaveUserName=${UnsaveUserName//".plus."/"+"}
+                UnsaveUserName=${UnsaveUserName//".equal."/"="}
+                UnsaveUserName=${UnsaveUserName//".comma."/","}
+                UnsaveUserName=${UnsaveUserName//".at."/"@"}
+                aws iam list-ssh-public-keys --user-name "$UnsaveUserName" --query "SSHPublicKeys[?Status == 'Active'].[SSHPublicKeyId]" --output text | while read -r KeyId; do
+                  aws iam get-ssh-public-key --user-name "$UnsaveUserName" --ssh-public-key-id "$KeyId" --encoding SSH --query "SSHPublicKey.SSHPublicKeyBody" --output text
+                done
+              mode: '000755'
+              owner: root
+              group: root
+            '/opt/import_users.sh':
+              content: |
+                #!/bin/bash -e
+                aws iam list-users --query "Users[].[UserName]" --output text | while read User; do
+                  SaveUserName="$User"
+                  SaveUserName=${SaveUserName//"+"/".plus."}
+                  SaveUserName=${SaveUserName//"="/".equal."}
+                  SaveUserName=${SaveUserName//","/".comma."}
+                  SaveUserName=${SaveUserName//"@"/".at."}
+                  if [ "${#SaveUserName}" -le "32" ]; then
+                    if ! id -u "$SaveUserName" >/dev/null 2>&1; then
+                      #sudo will read each file in /etc/sudoers.d, skipping file names that end in ‘~’ or contain a ‘.’ character to avoid causing problems with package manager or editor temporary/backup files.
+                      SaveUserFileName=$(echo "$SaveUserName" | tr "." " ")
+                      /usr/sbin/useradd "$SaveUserName"
+                      echo "$SaveUserName ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$SaveUserFileName"
+                    fi
+                  else
+                    echo "Can not import IAM user ${SaveUserName}. User name is longer than 32 characters."
+                  fi
+                done
+              mode: '000755'
+              owner: root
+              group: root
+            '/etc/cron.d/import_users':
+              content: |
+                */10 * * * * root /opt/import_users.sh
+              mode: '000644'
+              owner: root
+              group: root
+          commands:
+            'a_configure_sshd_command':
+              command: 'sed -e ''/AuthorizedKeysCommand / s/^#*/#/'' -i /etc/ssh/sshd_config; echo -e ''\nAuthorizedKeysCommand /opt/authorized_keys_command.sh'' >> /etc/ssh/sshd_config'
+              test: '! grep -q ''^AuthorizedKeysCommand /opt/authorized_keys_command.sh'' /etc/ssh/sshd_config'
+            'b_configure_sshd_commanduser':
+              command: 'sed -e ''/AuthorizedKeysCommandUser / s/^#*/#/'' -i /etc/ssh/sshd_config; echo -e ''\nAuthorizedKeysCommandUser nobody'' >> /etc/ssh/sshd_config'
+              test: '! grep -q ''^AuthorizedKeysCommandUser nobody'' /etc/ssh/sshd_config'
+            'c_import_users':
+              command: './import_users.sh'
+              cwd: '/opt'
+          services:
+            sysvinit:
+              sshd:
+                enabled: true
+                ensureRunning: true
+                commands:
+                - 'a_configure_sshd_command'
+                - 'b_configure_sshd_commanduser'
+        install:
+          packages:
+            yum:
+              amazon-ssm-agent: []
+          files:
+            '/etc/cfn/cfn-hup.conf':
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+                interval=1
+              mode: '000400'
+              owner: root
+              group: root
+            '/etc/cfn/hooks.d/cfn-auto-reloader.conf':
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.LaunchConfiguration.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init --verbose --stack=${AWS::StackName} --region=${AWS::Region} --resource=LaunchConfiguration
+                runas=root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                - '/etc/cfn/cfn-hup.conf'
+                - '/etc/cfn/hooks.d/cfn-auto-reloader.conf'
+              amazon-ssm-agent:
+                enabled: !If [HasSystemsManagerAccess, true, false]
+                ensureRunning: !If [HasSystemsManagerAccess, true, false]
+                packages:
+                  yum:
+                  - amazon-ssm-agent
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', ECSAMI]
+      IamInstanceProfile: !Ref InstanceProfile
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+      - !Ref SecurityGroup
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - ''
+          - - "#!/bin/bash -x\n"
+            - 'yum update -y'
+            - "\n"
+            - 'yum install -y nano'
+            - "\n"
+            - !If
+              - HasLogzio
+              - !Sub |
+                  #!/bin/bash -x
+                  DOCKERINSTANCE=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+                  LOGZIO_LOGS="docker-collector-logs"
+                  LOGZIO_METRICS="docker-collector-metrics"
+                  
+                  # Start the Logz.io log collector container
+                  /usr/bin/docker run -dit \
+                    --restart unless-stopped \
+                    --name $LOGZIO_LOGS \
+                    --log-driver="awslogs" \
+                    --log-opt awslogs-region="${AWS::Region}" \
+                    --log-opt awslogs-group="${LogGroup}" \
+                    --log-opt awslogs-stream="docker/logzio/$LOGZIO_LOGS" \
+                    --env LOGZIO_TOKEN="${LogzioToken}" \
+                    --env LOGZIO_REGION="${LogzioRegion}" \
+                    --env LOGZIO_TYPE="logs" \
+                    --env LOGZIO_CODEC="json" \
+                    --env HOSTNAME="${AWS::StackName}" \
+                    --env DOCKERINSTANCE="$DOCKERINSTANCE" \
+                    --env additionalFields="docker.host.instance=$DOCKERINSTANCE" \
+                    --env skipContainerName="$LOGZIO_LOGS,$LOGZIO_METRICS,ecs-agent" \
+                  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+                  -v /var/lib/docker/containers:/var/lib/docker/containers \
+                  logzio/$LOGZIO_LOGS
+
+                  # Start the Logz.io metrics collector container
+                  /usr/bin/docker run -dit \
+                    --restart unless-stopped \
+                    --name $LOGZIO_METRICS \
+                    --log-driver="awslogs" \
+                    --log-opt awslogs-region="${AWS::Region}" \
+                    --log-opt awslogs-group="${LogGroup}" \
+                    --log-opt awslogs-stream="docker/logzio/$LOGZIO_METRICS" \
+                    --env LOGZIO_TOKEN="${LogzioToken}" \
+                    --env LOGZIO_REGION="${LogzioRegion}" \
+                    --env LOGZIO_TYPE="metrics" \
+                    --env LOGZIO_LOG_LEVEL="INFO" \
+                    --env LOGZIO_MODULES="docker" \
+                    --env HOSTNAME="${AWS::StackName}" \
+                    --env DOCKERINSTANCE="$DOCKERINSTANCE" \
+                    --env CLOUD_METADATA="true" \
+                    --env DEBUG="false" \
+                  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+                  logzio/$LOGZIO_METRICS
+
+              - !Ref 'AWS::NoValue'
+            - "\n"
+            - !Sub |
+              #!/bin/bash -ex
+              trap '/opt/aws/bin/cfn-signal -e 1 --stack ${AWS::StackName} --resource AutoScalingGroup --region ${AWS::Region}' ERR
+              echo "ECS_CLUSTER=${Cluster}" >> /etc/ecs/ecs.config
+              echo "ECS_CONTAINER_STOP_TIMEOUT=${StopContainerTimeoutInSeconds}s" >> /etc/ecs/ecs.config
+              echo 'ECS_CONTAINER_INSTANCE_TAGS={"ENV": "${ENV}", "SYS": "${SYS}"}' >> /etc/ecs/ecs.config
+              yum install -y aws-cfn-bootstrap
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfiguration --region ${AWS::Region}
+              /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource AutoScalingGroup --region ${AWS::Region}
+  # Create Auto Scaling Group
+  AutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      DesiredCapacity: !Ref DesiredCapacity
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      Cooldown: '120'
+      HealthCheckGracePeriod: 60
+      HealthCheckType: EC2
+      NotificationConfigurations: !If
+      - HasAlertTopic
+      - - NotificationTypes:
+          - 'autoscaling:EC2_INSTANCE_LAUNCH_ERROR'
+          - 'autoscaling:EC2_INSTANCE_TERMINATE_ERROR'
+          TopicARN: {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      - []
+      VPCZoneIdentifier: 
+      - !If [HasAZA, {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetA${SubnetsReach}'}, !Ref 'AWS::NoValue']
+      - !If [HasAZB, {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetB${SubnetsReach}'}, !Ref 'AWS::NoValue']
+      Tags:
+      - Key: ENV
+        PropagateAtLaunch: true
+        Value: !Ref ENV
+      - Key: SYS
+        PropagateAtLaunch: true
+        Value: !Ref SYS
+      - Key: Name
+        Value: !Sub '${AWS::StackName}-Cluster'
+        PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        PauseTime: PT15M
+        SuspendProcesses:
+        - HealthCheck
+        - ReplaceUnhealthy
+        - AZRebalance
+        - AlarmNotification
+        - ScheduledActions
+        WaitOnResourceSignals: true
+
+  # ASG Scheduled Action to Start ECS instances
+  AutoScalingGroupStartScheduleAction:
+    Type: "AWS::AutoScaling::ScheduledAction"
+    Condition: HasAutoScaleScheduleStart
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      DesiredCapacity: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      MinSize: !Ref MinSize
+      Recurrence: !Ref AutoScaleScheduleStart
+  
+  # ASG Scheduled Action to Stop ECS instances
+  AutoScalingGroupStopScheduleAction:
+    Type: "AWS::AutoScaling::ScheduledAction"
+    Condition: HasAutoScaleScheduleStop
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      DesiredCapacity: 0
+      MaxSize: 0
+      MinSize: 0
+      Recurrence: !Ref AutoScaleScheduleStop
+  
+  CPUTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/EC2'
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref AutoScalingGroup
+  AutoScalingGroupLifecycleHookQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: !Sub '${AWS::StackName}-lifecycle-hook'
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt 'AutoScalingGroupLifecycleHookDeadLetterQueue.Arn'
+        maxReceiveCount: 5
+  AutoScalingGroupLifecycleHookQueueTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Queue contains messages older than 10 minutes, messages are not consumed'
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateAgeOfOldestMessage
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 600
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: QueueName
+        Value: !GetAtt 'AutoScalingGroupLifecycleHookQueue.QueueName'
+      TreatMissingData: notBreaching
+  AutoScalingGroupLifecycleHookDeadLetterQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: !Sub '${AWS::StackName}-lifecycle-hook-dlq'
+  AutoScalingGroupLifecycleHookDeadLetterQueueTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Dead letter queue contains messages, message processing failed'
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: QueueName
+        Value: !GetAtt 'AutoScalingGroupLifecycleHookDeadLetterQueue.QueueName'
+      TreatMissingData: notBreaching
+  AutoScalingGroupLifecycleHookIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: 'autoscaling.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Policies:
+      - PolicyName: sqs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Sid: write
+            Effect: Allow
+            Action:
+            - 'sqs:SendMessage'
+            - 'sqs:GetQueueUrl'
+            Resource: !GetAtt 'AutoScalingGroupLifecycleHookQueue.Arn'
+  AutoScalingGroupTerminatingLifecycleHook:
+    Type: 'AWS::AutoScaling::LifecycleHook'
+    Properties:
+      HeartbeatTimeout: 600
+      DefaultResult: CONTINUE
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      LifecycleTransition: 'autoscaling:EC2_INSTANCE_TERMINATING'
+      NotificationTargetARN: !GetAtt 'AutoScalingGroupLifecycleHookQueue.Arn'
+      RoleARN: !GetAtt 'AutoScalingGroupLifecycleHookIAMRole.Arn'
+  
+  ScaleUpPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: StepScaling
+      AdjustmentType: PercentChangeInCapacity
+      MinAdjustmentMagnitude: 1
+      StepAdjustments:
+      - MetricIntervalUpperBound: 0.0
+        ScalingAdjustment: 25
+
+  ScaleDownPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: StepScaling
+      AdjustmentType: PercentChangeInCapacity
+      MinAdjustmentMagnitude: 1
+      StepAdjustments:
+      - MetricIntervalLowerBound: 0.0
+        ScalingAdjustment: -25
+
+  ContainerInstancesShortageAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Cluster is running out of container instances'
+      Namespace: !Ref 'AWS::StackName'
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref Cluster
+      MetricName: SchedulableContainers
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Statistic: Minimum # special rule because we scale on reservations and not utilization
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: !Ref ContainerShortageThreshold
+      AlarmActions:
+      - !Ref ScaleUpPolicy
+  ContainerInstancesExcessAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Cluster is wasting container instances'
+      Namespace: !Ref 'AWS::StackName'
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref Cluster
+      MetricName: SchedulableContainers
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Statistic: Maximum # special rule because we scale on reservations and not utilization
+      Period: 60
+      EvaluationPeriods: 4
+      Threshold: !Ref ContainerExcessThreshold
+      AlarmActions:
+      - !Ref ScaleDownPolicy
+      
+  CPUReservationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU reservation over last 10 minutes higher than 90%'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref Cluster
+      MetricName: CPUReservation
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average # special rule because we scale on reservations and not utilization
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 90
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+  CPUUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref Cluster
+      MetricName: CPUUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+  MemoryReservationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average memory reservation over last 10 minutes higher than 90%'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref Cluster
+      MetricName: MemoryReservation
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average # special rule because we scale on reservations and not utilization
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 90
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+  MemoryUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average memory utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref Cluster
+      MetricName: MemoryUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+  
+  # Scaling based on SchedulableContainers is described in detail here: http://garbe.io/blog/2017/04/12/a-better-solution-to-ecs-autoscaling/
+  SchedulableContainersCron:
+    DependsOn:
+    - SchedulableContainersLambdaPolicy
+    Type: 'AWS::Events::Rule'
+    Properties:
+      ScheduleExpression: 'rate(1 minute)'
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt 'SchedulableContainersLambdaV2.Arn'
+        Id: lambda
+  SchedulableContainersCronFailedInvocationsTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Invocations failed permanently'
+      Namespace: 'AWS/Events'
+      MetricName: FailedInvocations
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: RuleName
+        Value: !Ref SchedulableContainersCron
+      TreatMissingData: notBreaching
+  SchedulableContainersLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: 'lambda.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Policies:
+      - PolicyName: ecs
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: 'ecs:ListContainerInstances'
+            Resource: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${Cluster}'
+          - Effect: Allow
+            Action: 'ecs:DescribeContainerInstances'
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                'ecs:cluster': !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${Cluster}'
+      - PolicyName: cloudwatch
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: 'cloudwatch:PutMetricData'
+            Resource: '*'
+  SchedulableContainersLambdaPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      Roles:
+      - !Ref SchedulableContainersLambdaRole
+      PolicyName: lambda
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - 'logs:CreateLogStream'
+          - 'logs:PutLogEvents'
+          Resource: !GetAtt 'SchedulableContainersLogGroup.Arn'
+  SchedulableContainersLambdaPermission2:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref SchedulableContainersLambdaV2
+      Principal: 'events.amazonaws.com'
+      SourceArn: !GetAtt 'SchedulableContainersCron.Arn'
+  SchedulableContainersLambdaV2:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: !Sub |
+          'use strict';
+          const AWS = require('aws-sdk');
+          const ecs = new AWS.ECS({apiVersion: '2014-11-13'});
+          const cloudwatch = new AWS.CloudWatch({apiVersion: '2010-08-01'});
+          const CONTAINER_MAX_CPU = ${ContainerMaxCPU};
+          const CONTAINER_MAX_MEMORY = ${ContainerMaxMemory};
+          const CLUSTER = '${Cluster}';
+          const NAMESPACE = '${AWS::StackName}';
+          function list(nextToken) {
+            return ecs.listContainerInstances({
+              cluster: CLUSTER,
+              maxResults: 1,
+              nextToken: nextToken,
+              status: 'ACTIVE'
+            }).promise();
+          }
+          function describe(containerInstanceArns) {
+            return ecs.describeContainerInstances({
+              cluster: CLUSTER,
+              containerInstances: containerInstanceArns
+            }).promise();
+          }
+          function compute(totalSchedulableContainers, nextToken) {
+            return list(nextToken)
+              .then((list) => {
+                return describe(list.containerInstanceArns)
+                  .then((data) => {
+                    const localSchedulableContainers = data.containerInstances
+                      .map((instance) => ({
+                        cpu: instance.remainingResources.find((resource) => resource.name === 'CPU').integerValue,
+                        memory: instance.remainingResources.find((resource) => resource.name === 'MEMORY').integerValue
+                      }))
+                      .map((remaining) => Math.min(Math.floor(remaining.cpu/CONTAINER_MAX_CPU), Math.floor(remaining.memory/CONTAINER_MAX_MEMORY)))
+                      .reduce((acc, containers) => acc + containers, 0);
+                    console.log(`localSchedulableContainers ${!localSchedulableContainers}`);
+                    if (list.nextToken !== null && list.nextToken !== undefined) {
+                      return compute(localSchedulableContainers + totalSchedulableContainers, list.nextToken);
+                    } else {
+                      return localSchedulableContainers + totalSchedulableContainers;
+                    }
+                  });
+              });
+          }
+          exports.handler = (event, context, cb) => {
+            console.log(`Invoke: ${!JSON.stringify(event)}`);
+            compute(0, undefined)
+              .then((schedulableContainers) => {
+                console.log(`schedulableContainers: ${!schedulableContainers}`);
+                return cloudwatch.putMetricData({
+                  MetricData: [{
+                    MetricName: 'SchedulableContainers',
+                    Dimensions: [{
+                      Name: 'ClusterName',
+                      Value: CLUSTER
+                    }],
+                    Value: schedulableContainers,
+                    Unit: 'Count'
+                  }],
+                  Namespace: NAMESPACE
+                }).promise();
+              })
+              .then(() => cb())
+              .catch(cb);
+          };
+      Handler: 'index.handler'
+      MemorySize: 128
+      Role: !GetAtt 'SchedulableContainersLambdaRole.Arn'
+      Runtime: 'nodejs12.x'
+      Timeout: 60
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+  SchedulableContainersLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${SchedulableContainersLambdaV2}'
+      RetentionInDays: !Ref LogsRetentionInDays
+  SchedulableContainersLambdaErrorsTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Invocations failed due to errors in the function'
+      Namespace: 'AWS/Lambda'
+      MetricName: Errors
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: FunctionName
+        Value: !Ref SchedulableContainersLambdaV2
+      TreatMissingData: notBreaching
+  SchedulableContainersLambdaThrottlesTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Invocation attempts that were throttled due to invocation rates exceeding the concurrent limits'
+      Namespace: 'AWS/Lambda'
+      MetricName: Throttles
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: FunctionName
+        Value: !Ref SchedulableContainersLambdaV2
+      TreatMissingData: notBreaching
+  DrainInstanceLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: 'lambda.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Policies:
+      - PolicyName: draininstance
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'sqs:DeleteMessage'
+            - 'sqs:ReceiveMessage'
+            - 'sqs:SendMessage'
+            - 'sqs:GetQueueAttributes'
+            Resource: !GetAtt 'AutoScalingGroupLifecycleHookQueue.Arn'
+          - Effect: Allow
+            Action:
+            - 'ecs:ListContainerInstances'
+            Resource: !GetAtt 'Cluster.Arn'
+          - Effect: Allow
+            Action:
+            - 'ecs:updateContainerInstancesState'
+            - 'ecs:listTasks'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'ecs:cluster': !GetAtt 'Cluster.Arn'
+          - Effect: Allow
+            Action:
+            - 'autoscaling:CompleteLifecycleAction'
+            - 'autoscaling:RecordLifecycleActionHeartbeat'
+            Resource: !Sub 'arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AutoScalingGroup}'
+  DrainInstanceLambdaPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      Roles:
+      - !Ref DrainInstanceLambdaRole
+      PolicyName: lambda
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - 'logs:CreateLogStream'
+          - 'logs:PutLogEvents'
+          Resource: !GetAtt 'DrainInstanceLogGroup.Arn'
+  DrainInstanceEventSourceMapping:
+    DependsOn:
+    - DrainInstanceLambdaPolicy
+    - DrainInstanceLogGroup
+    Type: 'AWS::Lambda::EventSourceMapping'
+    Properties:
+      BatchSize: 1
+      Enabled: true
+      EventSourceArn: !GetAtt 'AutoScalingGroupLifecycleHookQueue.Arn'
+      FunctionName: !GetAtt DrainInstanceLambda.Arn
+  DrainInstanceLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          'use strict';
+          const AWS = require('aws-sdk');
+          const ecs = new AWS.ECS({apiVersion: '2014-11-13'});
+          const sqs = new AWS.SQS({apiVersion: '2012-11-05'});
+          const asg = new AWS.AutoScaling({apiVersion: '2011-01-01'});
+          const cluster = process.env.CLUSTER;
+          const queueUrl = process.env.QUEUE_URL;
+          const drainingTimeout = process.env.DRAINING_TIMEOUT;
+          async function getContainerInstanceArn(ec2InstanceId) {
+            console.log(`getContainerInstanceArn(${[...arguments].join(', ')})`);
+            const listResult = await ecs.listContainerInstances({cluster: cluster, filter: `ec2InstanceId == '${ec2InstanceId}'`}).promise();
+            return listResult.containerInstanceArns[0];
+          }
+          async function drainInstance(ciArn) {
+            console.log(`drainInstance(${[...arguments].join(', ')})`);
+            await ecs.updateContainerInstancesState({cluster: cluster, containerInstances: [ciArn], status: 'DRAINING'}).promise();
+          }
+          async function wait(ciArn, asgName, lchName, lcaToken, terminateTime) {
+            console.log(`wait(${[...arguments].join(', ')})`);
+            const payload = {
+              Service: 'DrainInstance',
+              Event: 'custom:DRAIN_WAIT',
+              ContainerInstanceArn: ciArn,
+              AutoScalingGroupName: asgName,
+              LifecycleHookName: lchName,
+              LifecycleActionToken: lcaToken,
+              TerminateTime: terminateTime
+            };
+            await sqs.sendMessage({
+              QueueUrl: queueUrl,
+              DelaySeconds: 60,
+              MessageBody: JSON.stringify(payload)
+            }).promise();
+          }
+          async function countTasks(ciArn) {
+            console.log(`countTasks(${[...arguments].join(', ')})`);
+            const listResult = await ecs.listTasks({cluster: cluster, containerInstance: ciArn}).promise();
+            return listResult.taskArns.length;
+          }
+          async function terminateInstance(asgName, lchName, lcaToken) {
+            console.log(`terminateInstance(${[...arguments].join(', ')})`);
+            await asg.completeLifecycleAction({
+              AutoScalingGroupName: asgName,
+              LifecycleHookName: lchName,
+              LifecycleActionToken: lcaToken,
+              LifecycleActionResult: 'CONTINUE'
+            }).promise();
+          }
+          async function heartbeat(asgName, lchName, lcaToken) {
+            console.log(`heartbeat(${[...arguments].join(', ')})`);
+            await asg.recordLifecycleActionHeartbeat({
+              AutoScalingGroupName: asgName,
+              LifecycleHookName: lchName,
+              LifecycleActionToken: lcaToken
+            }).promise();
+          }
+          exports.handler = async function(event, context) {
+            console.log(`Invoke: ${JSON.stringify(event)}`);
+            const body = JSON.parse(event.Records[0].body); // batch size is 1
+            if (body.Service === 'AWS Auto Scaling' && body.Event === 'autoscaling:TEST_NOTIFICATION') {
+              console.log('Ignore autoscaling:TEST_NOTIFICATION')
+            } else if (body.Service === 'AWS Auto Scaling' && body.LifecycleTransition === 'autoscaling:EC2_INSTANCE_TERMINATING') {
+              const lcaToken = body.LifecycleActionToken;
+              const ciArn = await getContainerInstanceArn(body.EC2InstanceId);
+              await drainInstance(ciArn);
+              await wait(ciArn, body.AutoScalingGroupName, body.LifecycleHookName, body.LifecycleActionToken, body.Time);
+            } else if (body.Service === 'DrainInstance' && body.Event === 'custom:DRAIN_WAIT') {
+              const taskCount = await countTasks(body.ContainerInstanceArn);
+              if (taskCount === 0) {
+                await terminateInstance(body.AutoScalingGroupName, body.LifecycleHookName, body.LifecycleActionToken);
+              } else {
+                const actionDuration = (Date.now() - new Date(body.TerminateTime).getTime()) / 1000;
+                if (actionDuration < drainingTimeout) {
+                  await heartbeat(body.AutoScalingGroupName, body.LifecycleHookName, body.LifecycleActionToken);
+                  await wait(body.ContainerInstanceArn, body.AutoScalingGroupName, body.LifecycleHookName, body.LifecycleActionToken, body.TerminateTime);
+                } else {
+                  console.log('Timeout for instance termination reached.');
+                  await terminateInstance(body.AutoScalingGroupName, body.LifecycleHookName, body.LifecycleActionToken);
+                }
+              }
+            } else {
+              console.log('Ignore unxpected event');
+            }
+          };
+      Handler: 'index.handler'
+      MemorySize: 128
+      Role: !GetAtt 'DrainInstanceLambdaRole.Arn'
+      Runtime: 'nodejs12.x'
+      Timeout: 30
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+      Environment:
+        Variables:
+          CLUSTER: !Ref Cluster
+          QUEUE_URL: !Ref AutoScalingGroupLifecycleHookQueue
+          DRAINING_TIMEOUT: !Ref DrainingTimeoutInSeconds
+      ReservedConcurrentExecutions: 1
+  DrainInstanceLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DrainInstanceLambda}'
+      RetentionInDays: !Ref LogsRetentionInDays
+  DrainInstanceLambdaErrorsTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Invocations failed due to errors in the function'
+      Namespace: 'AWS/Lambda'
+      MetricName: Errors
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: FunctionName
+        Value: !Ref DrainInstanceLambda
+      TreatMissingData: notBreaching
+
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'ecs'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-StackName'
+  Cluster:
+    Description: 'ECS cluster.'
+    Value: !Ref Cluster
+    Export:
+      Name: !Sub '${AWS::StackName}-Cluster' 
+  VPC:
+    Description: 'VPC of ECS cluster.'
+    Value: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
+    Export:
+      Name: !Sub '${AWS::StackName}-VPC'
+  SecurityGroup:
+    Description: 'Security Group of ECS cluster.'
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroup'
+  LogGroup:
+    Description: 'Log group of ECS cluster.'
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroup' 

@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Content Delivery: Cloudfront Distribution with Application Load Balancer as origin'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentALBStack 
+    - Label:
+        default: 'Cloudfront Properties'
+      Parameters:
+      - ALBProtocolPolicy 
+      - CacheDefaultTTL
+      - CacheMaxTTL
+      - CacheMinTTL
+    - Label:
+        default: 'Global Tags'
+      Parameters:
+      - ENV
+      - SYS
+Parameters:
+  ParentALBStack:
+    Description: 'Stack name of parent applicaiton load balancer stack based on wecari-alb.yaml template.'
+    Type: String 
+    
+  ALBProtocolPolicy:
+    Description: 'What protocol to connect to ALB with. http only, https only or same protocol as viewer'
+    Type: String 
+    Default: 'match-viewer'
+    AllowedValues:
+    - 'http-only'
+    - 'https-only'
+    - 'match-viewer'
+  CacheDefaultTTL:
+    Description: 'Cache Default TTL in seconds'
+    Type: Number
+    Default: 3600
+    MinValue: 0
+  CacheMaxTTL:
+    Description: 'Cache Maximum TTL in seconds'
+    Type: Number
+    Default: 86400
+    MinValue: 0
+  CacheMinTTL:
+    Description: 'Cache Minimum TTL in seconds'
+    Type: Number
+    Default: 0
+    MinValue: 0
+    
+  ENV:
+    Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
+    Type: String
+    Default: 'dev'
+    AllowedValues:
+    - 'dev'
+    - 'staging'
+    - 'prod'
+  SYS:
+    Description: 'Specify type System the resource is associated with this Resource (backend,frontend,both)'
+    Type: String
+    AllowedValues:
+    - 'backend'
+    - 'frontend'
+    - 'both'
+  
+Resources:
+
+  CloudFrontDistribution:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        Origins:
+        - DomainName: {'Fn::ImportValue': !Sub '${ParentALBStack}-DNSName'}
+          Id: elb
+          CustomOriginConfig:
+            OriginProtocolPolicy: !Ref ALBProtocolPolicy
+            OriginReadTimeout: 60
+        DefaultCacheBehavior:
+          AllowedMethods:
+          - DELETE
+          - GET
+          - HEAD
+          - OPTIONS
+          - PATCH
+          - POST
+          - PUT
+          DefaultTTL: !Ref CacheDefaultTTL
+          MaxTTL: !Ref CacheMaxTTL
+          MinTTL: !Ref CacheMinTTL
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: all
+          TargetOriginId: elb
+          ViewerProtocolPolicy: 'redirect-to-https'
+          Compress: true
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        PriceClass: 'PriceClass_All'
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'cdn-alb'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+
+  CloudFrontID:
+    Description: 'The ID of the CloudFront distribution.'
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontARN'
+  CloudFrontDomainName:
+    Description: 'The domain name of the CloudFront distribution.'
+    Value: !Sub ${CloudFrontDistribution.DomainName}
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDomainName'

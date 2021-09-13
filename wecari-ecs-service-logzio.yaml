@@ -1,0 +1,411 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Service for Logz.io logzio-mysql-logs collector. Used to forward mysql logs to Logz.io'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentClusterStack
+      - ParentMysqlStack
+      - ParentAlertStack
+    - Label:
+        default: 'Task Parameters'
+      Parameters:
+      - Memory
+    - Label:
+        default: 'Logz.io Global Environment Variables'
+      Parameters:
+      - LogzioToken
+      - LogzioListner
+      - LogzioAWSAccessKey
+      - LogzioAWSAccessSecret
+      - LogzioRDSRErrorLogFile
+      - LogzioRDSRSlowLogFile
+      - LogzioRDSRGeneralLogFile
+      - LogzioInterval
+    - Label:
+        default: 'Service Parameters'
+      Parameters:
+      - DesiredCount
+      - AutoScaling
+      - MaxCapacity
+      - MinCapacity
+
+Parameters:
+  ParentClusterStack:
+    Description: 'Stack name of parent Cluster stack based on wecari-ecs.yaml template.'
+    Type: String
+  ParentMysqlStack:
+    Description: 'Stack name of parent RDS MYSQL stack based on wecari-rds-mysql.yaml template.'
+    Type: String
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Type: String
+    Default: '' 
+ 
+  Memory:
+    Description: 'The maximum amount of memory to assign to this task. Must be lower that the available memory of the Instance'
+    Type: Number
+    Default: 256
+    AllowedValues:
+    - 64
+    - 128
+    - 192
+    - 256
+    - 320
+    - 384
+    - 448
+    - 512
+    
+  LogzioToken:
+    Description: 'Required. Your Logz.io account token. Replace <ACCOUNT-TOKEN> with the token of the account you want to ship to.'
+    Type: String
+    NoEcho: true
+
+  LogzioListner:
+    Description: 'Default: listener.logz.io. Logz.io listener host to ship the logs to. Replace <<LISTENER-HOST>> with the host for your region. For example, listener.logz.io if your account is hosted on AWS US East, or listener-nl.logz.io if hosted on Azure West Europe.'
+    Type: String
+    Default: 'listener.logz.io'
+
+  LogzioAWSAccessKey:
+    Description: 'Required: A proper AMI credentials for RDS logs access (permissions for download-db-log-file-portion and describe-db-log-files are needed)'
+    Type: String
+
+  LogzioAWSAccessSecret:
+    Description: 'Required: A proper AMI credentials for RDS logs access (permissions for download-db-log-file-portion and describe-db-log-files are needed)'
+    Type: String
+    NoEcho: true
+
+  LogzioRDSRErrorLogFile:
+    Description: 'Optional: The path to the RDS error log file. Default: error/mysql-error.log'
+    Type: String
+    Default: 'error/mysql-error.log'
+
+  LogzioRDSRSlowLogFile:
+    Description: 'Optional: The path to the RDS slow query log file. Default: slowquery/mysql-slowquery.log'
+    Type: String
+    Default: 'slowquery/mysql-slowquery.log'
+
+  LogzioRDSRGeneralLogFile:
+    Description: 'Optional: The path to the RDS general log file. Default: general/mysql-general.log'
+    Type: String
+    Default: 'general/mysql-general.log'
+
+  LogzioInterval:
+    Description: 'Optional: The number of seconds to wait between each call to monitor. Default: 60'
+    Type: Number
+    Default: 60
+    MinValue: 10
+
+  DesiredCount:
+    Description: 'The number of simultaneous tasks, that you want to run on the cluster. CF will also expect the total number of services to reach this amount before completing deployment'
+    Type: Number
+    Default: 2
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+
+  AutoScaling:
+    Description: 'Scale number of tasks based on CPU load?'
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  MaxCapacity:
+    Description: 'If AutoScaling = true. The maximum number of simultaneous tasks, that you want to run on the cluster.'
+    Type: Number
+    Default: 8
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+  MinCapacity:
+    Description: 'If AutoScaling = true. The minimum number of simultaneous tasks, that you want to run on the cluster.'
+    Type: Number
+    Default: 2
+    ConstraintDescription: 'Must be >= 1'
+    MinValue: 1
+
+Conditions:
+  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
+  HasAutoScaling: !Equals [!Ref AutoScaling, 'true']
+
+Resources:
+
+  DefaultTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Ref 'AWS::StackName'
+      NetworkMode: bridge
+      Memory: !Ref Memory
+      Volumes:
+      - Name: logzio-logs
+        Host:
+          SourcePath: '/var/log/logzio'
+      - Name: mysql-logs
+        Host:
+          SourcePath: '/var/log/mysql'
+      ContainerDefinitions:
+      - Name: logzio-mysql-logs
+        Image: logzio/mysql-logs:latest
+        Essential: true 
+        HealthCheck:
+          Command: 
+            - "CMD-SHELL"
+            - "echo"
+            - "started"
+          Interval: 10
+          Retries: 3
+          StartPeriod: 30
+          Timeout: 30
+        MountPoints:
+        - SourceVolume: 'logzio-logs'
+          ContainerPath: '/var/log/logzio'
+        - SourceVolume: 'mysql-logs'
+          ContainerPath: '/var/log/mysql'
+        Environment:
+          - Name: HOSTNAME
+            Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-StackName'}
+          - Name: LOGZIO_TOKEN
+            Value: !Ref LogzioToken
+          - Name: LOGZIO_LISTENER
+            Value: !Ref LogzioListner
+          - Name: AWS_ACCESS_KEY
+            Value: !Ref LogzioAWSAccessKey
+          - Name: AWS_SECRET_KEY
+            Value: !Ref LogzioAWSAccessSecret
+          - Name: AWS_REGION
+            Value: !Ref 'AWS::Region'
+          - Name: RDS_IDENTIFIER
+            Value: {'Fn::ImportValue': !Sub '${ParentMysqlStack}-InstanceName'}
+          - Name: RDS_ERROR_LOG_FILE
+            Value: !Ref LogzioRDSRErrorLogFile
+          - Name: RDS_SLOW_LOG_FILE
+            Value: !Ref LogzioRDSRSlowLogFile
+          - Name: RDS_LOG_FILE
+            Value: !Ref LogzioRDSRGeneralLogFile
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            'awslogs-region': !Ref 'AWS::Region'
+            'awslogs-group': {'Fn::ImportValue': !Sub '${ParentClusterStack}-LogGroup'}
+            'awslogs-stream-prefix': !Sub '${AWS::StackName}'
+
+  # ECS Service
+  Service:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      Cluster: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0 
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: !Ref DesiredCount
+      PlacementStrategies:
+      - Type: spread
+        Field: 'attribute:ecs.availability-zone'
+      - Type: spread
+        Field: instanceId
+      SchedulingStrategy: REPLICA
+      TaskDefinition: !Ref DefaultTaskDefinition
+        
+  # ECS Service Alarms and Notification
+  CPUUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      - Name: ServiceName
+        Value: !GetAtt 'Service.Name'
+      MetricName: CPUUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+
+  MemoryUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average Memory utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      - Name: ServiceName
+        Value: !GetAtt 'Service.Name'
+      MetricName: MemoryUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+
+  ServiceFailedNotification:
+    Condition: HasAlertTopic
+    Type: 'AWS::Events::Rule'
+    Properties:
+      EventPattern:
+        source:
+        - 'aws.ec2'
+        'detail-type':
+        - 'ECS Service Action'
+        resources:
+        - !Ref Service
+        detail:
+          eventType:
+          - ERROR
+          - WARN
+      State: ENABLED
+      Targets:
+      - Arn: {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+        Id: rule
+  
+  # Service Auto Scaling
+  ScalableTargetRole: # based on http://docs.aws.amazon.com/AmazonECS/latest/developerguide/autoscale_IAM_role.html
+    Condition: HasAutoScaling
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: 'application-autoscaling.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Policies:
+      - PolicyName: ecs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'ecs:DescribeServices'
+            - 'ecs:UpdateService'
+            Resource: '*'
+      - PolicyName: cloudwatch
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'cloudwatch:DescribeAlarms'
+            Resource: '*'
+
+  ScalableTarget:
+    Condition: HasAutoScaling
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    Properties:
+      MaxCapacity: !Ref MaxCapacity
+      MinCapacity: !Ref MinCapacity
+      ResourceId: !Sub
+      - 'service/${Cluster}/${Service}'
+      - Cluster: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+        Service: !GetAtt 'Service.Name'
+      RoleARN: !GetAtt 'ScalableTargetRole.Arn'
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  ScaleUpPolicy:
+    Condition: HasAutoScaling
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub '${AWS::StackName}-scale-up'
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: PercentChangeInCapacity
+        Cooldown: 300
+        MinAdjustmentMagnitude: 1
+        StepAdjustments:
+        - MetricIntervalLowerBound: 0
+          ScalingAdjustment: 25
+
+  ScaleDownPolicy:
+    Condition: HasAutoScaling
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub '${AWS::StackName}-scale-down'
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: PercentChangeInCapacity
+        Cooldown: 300
+        MinAdjustmentMagnitude: 1
+        StepAdjustments:
+        - MetricIntervalUpperBound: 0
+          ScalingAdjustment: -25
+  
+  # CPU Utilization
+  CPUUtilizationHighAlarm:
+    Condition: HasAutoScaling
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Service is running out of CPU'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      - Name: ServiceName
+        Value: !GetAtt 'Service.Name'
+      MetricName: CPUUtilization
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      AlarmActions:
+      - !Ref ScaleUpPolicy
+      
+  CPUUtilizationLowAlarm:
+    Condition: HasAutoScaling
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Service is wasting CPU'
+      Namespace: 'AWS/ECS'
+      Dimensions:
+      - Name: ClusterName
+        Value: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+      - Name: ServiceName
+        Value: !GetAtt 'Service.Name'
+      MetricName: CPUUtilization
+      ComparisonOperator: LessThanThreshold
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 20
+      AlarmActions:
+      - !Ref ScaleDownPolicy
+
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'ecs-service-logzio-mysql'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-StackName' 
+  Service:
+    Description: 'ECS Service'
+    Value: !GetAtt Service.Name
+    Export:
+      Name: !Sub '${AWS::StackName}-Service'
+  TaskDefinition:
+    Description: 'ECS Service TaskDefinition'
+    Value: !Ref DefaultTaskDefinition
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinition'

@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPC Gateway Endpoint (S3). To securely connect endpoints in VPC to S3 via AWS PrivateLink'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentVPCStack
+Parameters:
+  ParentVPCStack:
+    Description: Stack name of parent VPC stack based on wecari-vpc.yaml template.
+    Type: String
+Resources:
+  EndpointS3:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      RouteTableIds: !Split [',', !Join [',', [{'Fn::ImportValue': !Sub '${ParentVPCStack}-RouteTablesPublic'}, {'Fn::ImportValue': !Sub '${ParentVPCStack}-RouteTablesPrivate'}]]]
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'vpc-endpoint-s3'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+  Endpoint:
+    Description: 'The VPC endpoint to S3.'
+    Value: !Ref EndpointS3
+    Export:
+      Name: !Sub '${AWS::StackName}-EndpointS3'

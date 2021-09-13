@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Setup subsribable SNS Topic to receive infrastructure alerts'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Alert Parameters'
+      Parameters:
+      - Email
+      - HttpEndpoint
+      - HttpsEndpoint
+    - Label:
+        default: 'Fallback Parameters'
+      Parameters:
+      - FallbackEmail
+    - Label:
+        default: 'Global Tags'
+      Parameters:
+      - ENV
+      - SYS
+Parameters:
+  Email:
+    Description: 'Optional email address that will receive alerts.'
+    Type: String
+    Default: ''
+  HttpEndpoint:
+    Description: 'Optional HTTP endpoint that will receive alerts via POST requests.'
+    Type: String
+    Default: ''
+  HttpsEndpoint:
+    Description: 'Optional HTTPS endpoint that will receive alerts via POST requests (e.g., a marbot.io endpoint for incident management in Slack).'
+    Type: String
+    Default: ''
+  FallbackEmail:
+    Description: 'Optional email address that will receive alerts if alerts can not be delivered.'
+    Type: String
+    Default: ''
+  
+  ENV:
+    Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
+    Type: String
+    Default: 'dev'
+    AllowedValues:
+    - 'dev'
+    - 'staging'
+    - 'prod'
+  SYS:
+    Description: 'Specify type System the resource is associated with this Resource (backend,frontend,both)'
+    Type: String
+    AllowedValues:
+    - 'backend'
+    - 'frontend'
+    - 'both'
+Conditions:
+  HasEmail: !Not [!Equals [!Ref Email, '']]
+  HasHttpEndpoint: !Not [!Equals [!Ref HttpEndpoint, '']]
+  HasHttpsEndpoint: !Not [!Equals [!Ref HttpsEndpoint, '']]
+  HasFallbackEmail: !Not [!Equals [!Ref FallbackEmail, '']]
+Resources:
+
+  # Create Topic
+  Topic:
+    Type: 'AWS::SNS::Topic'
+    Properties: 
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+  
+  # Assign Access Policy to Topic
+  TopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      PolicyDocument:
+        Id: !Sub
+          - '${TopicName}-Policy'
+          - TopicName: !GetAtt 'Topic.TopicName'
+        Version: '2012-10-17'
+        Statement:
+        - Sid: !Sub
+          - '${TopicName}-SID-Default'
+          - TopicName: !GetAtt 'Topic.TopicName'
+          Effect: Allow
+          Principal:
+            AWS: '*' # Allow CloudWatch Alarms, ElastiCache Notifications, Elastic Beanstalk Notifications, Auto Scaling Notification etc
+          Action:
+          - SNS:GetTopicAttributes
+          - SNS:SetTopicAttributes
+          - SNS:AddPermission
+          - SNS:RemovePermission
+          - SNS:DeleteTopic
+          - SNS:Subscribe
+          - SNS:ListSubscriptionsByTopic
+          - SNS:Publish
+          - SNS:Receive
+          Resource: !Ref Topic
+          Condition:
+            StringEquals:
+              'AWS:SourceOwner': !Ref 'AWS::AccountId'
+        - Sid:  !Sub
+          - '${TopicName}-SID-1'
+          - TopicName: !GetAtt 'Topic.TopicName'
+          Effect: Allow
+          Principal:
+            Service:
+            - 'events.amazonaws.com' # Allow CloudWatch Events
+            - 'budgets.amazonaws.com' # Allow Budget Notifications
+            - 'rds.amazonaws.com' # Allow RDS Events
+            - 's3.amazonaws.com' # Allow S3 Event Notifications
+            - 'backup.amazonaws.com' # Allow Backup Events
+          Action: 'SNS:Publish'
+          Resource: !Ref Topic
+        - Sid:  !Sub
+          - '${TopicName}-SID-2'
+          - TopicName: !GetAtt 'Topic.TopicName'
+          Effect: Allow
+          Principal:
+            Service:
+            - 'codestar-notifications.amazonaws.com' # Allow Codestar Notification Events
+          Action: 'SNS:Publish'
+          Resource: !Ref Topic
+        - Sid: !Sub
+          - '${TopicName}-SID-3'
+          - TopicName: !GetAtt 'Topic.TopicName'
+          Effect: Allow
+          Principal:
+            Service: 'ses.amazonaws.com' # Allow SES Notifications & Events
+          Action: 'SNS:Publish'
+          Resource: !Ref Topic
+          Condition:
+            StringEquals:
+              'AWS:Referer': !Ref 'AWS::AccountId'
+      Topics:
+      - !Ref Topic
+
+  # Create Fallback Topic - To be triggered when main Topic failed to deliver
+  FallbackTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties: 
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+
+  # Failure Alarm to monitor Notification fail rate
+  NumberOfNotificationsFailedTooHighAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Alerts could not be delivered'
+      Namespace: 'AWS/SNS'
+      MetricName: NumberOfNotificationsFailed
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      AlarmActions:
+      - !Ref FallbackTopic
+      Dimensions:
+      - Name: TopicName
+        Value: !GetAtt Topic.TopicName
+      TreatMissingData: notBreaching
+  
+  # Email Subscription
+  EmailSubscription:
+    Condition: HasEmail
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      Endpoint: !Ref Email
+      Protocol: email
+      TopicArn: !Ref Topic
+
+  # HTTP Subscription
+  HttpEndpointSubscription:
+    Condition: HasHttpEndpoint
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      DeliveryPolicy:
+        healthyRetryPolicy:
+          minDelayTarget: 1
+          maxDelayTarget: 60
+          numRetries: 100
+          numNoDelayRetries: 0
+          backoffFunction: exponential
+        throttlePolicy:
+          maxReceivesPerSecond: 1
+      Endpoint: !Ref HttpEndpoint
+      Protocol: http
+      TopicArn: !Ref Topic
+
+  # HTTPS Subscription
+  HttpsEndpointSubscription:
+    Condition: HasHttpsEndpoint
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      DeliveryPolicy:
+        healthyRetryPolicy:
+          minDelayTarget: 1
+          maxDelayTarget: 60
+          numRetries: 100
+          numNoDelayRetries: 0
+          backoffFunction: exponential
+        throttlePolicy:
+          maxReceivesPerSecond: 1
+      Endpoint: !Ref HttpsEndpoint
+      Protocol: https
+      TopicArn: !Ref Topic
+
+  # Fallback Email Subscription
+  FallbackEmailSubscription:
+    Condition: HasFallbackEmail
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      Endpoint: !Ref FallbackEmail
+      Protocol: email
+      TopicArn: !Ref FallbackTopic
+
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'alert'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-StackName'
+  TopicARN:
+    Description: 'The ARN of the alert topic.'
+    Value: !Ref Topic
+    Export:
+      Name: !Sub '${AWS::StackName}-TopicARN'

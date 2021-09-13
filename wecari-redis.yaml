@@ -1,0 +1,391 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ElastiCache redis'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Parent Stacks'
+      Parameters:
+      - ParentVPCStack
+      - ParentClusterStack
+      - ParentKmsKeyStack
+      - ParentSSHBastionStack
+      - ParentAlertStack
+    - Label:
+        default: 'ElastiCache Parameters'
+      Parameters:
+      - EngineVersion
+      - CacheNodeType
+      - TransitEncryption
+      - ClusterMode
+      - AuthToken
+      - SnapshotRetentionLimit
+      - SnapshotName
+      - NumShards
+      - NumReplicas
+      - MultiAZ
+      - PreferredBackupWindow
+      - PreferredMaintenanceWindow
+    - Label:
+        default: 'Global Tags'
+      Parameters:
+      - ENV
+      - SYS
+Parameters:
+  ParentVPCStack:
+    Description: 'Stack name of parent VPC stack based on wecari-vpc.yaml template.'
+    Type: String 
+  ParentClusterStack:
+    Description: 'Stack name of parent Cluster stack based on wecari-ecs.yaml template.'
+    Type: String
+  ParentKmsKeyStack:
+    Description: 'Optional stack name of parent KMS key stack based on wecari-kms-key.yaml template.'
+    Type: String
+    Default: '' 
+  ParentSSHBastionStack:
+    Description: 'Optional but recommended stack name of parent SSH bastion host/instance stack based on wecari-bastion.yaml template.'
+    Type: String
+    Default: ''
+  ParentAlertStack:
+    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Type: String
+    Default: ''
+
+  EngineVersion:
+    Description: 'Redis version'
+    Type: String
+    Default: '5.0.0'
+    AllowedValues: # aws elasticache describe-cache-engine-versions --engine redis --query "CacheEngineVersions[].EngineVersion"
+    - '5.0.4'
+    - '5.0.0'
+    - '4.0.10'
+    - '3.2.6' # 3.2.4 and 3.2.10 do not support encryption
+  CacheNodeType:
+    Description: 'The compute and memory capacity of the nodes in the node group (shard).'
+    Type: 'String'
+    Default: 'cache.t2.micro'
+  TransitEncryption:
+    Description: 'Enable encryption for data in transit? (see https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/in-transit-encryption.html)'
+    Type: 'String'
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  ClusterMode:
+    Description: 'Enable Cluster Mode'
+    Type: 'String'
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+  AuthToken:
+    Description: 'Optional password (16 to 128 characters) used to authenticate against Redis (requires TransitEncryption := true; leave blank to disable password-protection).'
+    Type: 'String'
+    Default: ''
+    NoEcho: True
+    MaxLength: 128
+  SnapshotRetentionLimit:
+    Description: 'The number of days for which ElastiCache retains automatic snapshots before deleting them (set to 0 to disable backups).'
+    Type: Number
+    Default: 35
+    MinValue: 0
+    MaxValue: 35
+  SnapshotName:
+    Description: 'Optional name of a snapshot from which you want to restore (leave blank to create an empty cache).'
+    Type: 'String'
+    Default: '' 
+  NumShards:
+    Description: 'Number of shards in the cluster.'
+    Type: 'Number'
+    Default: 1
+    MinValue: 1
+    MaxValue: 250
+  NumReplicas:
+    Description: 'Number of replicas per shard.'
+    Type: 'Number'
+    Default: 1
+    MinValue: 0
+    MaxValue: 5
+  MultiAZ:
+    Description: 'Specifies if the database instance is deployed to multiple Availability Zones for HA.'
+    Type: String
+    Default: true
+    AllowedValues: [true, false] 
+  PreferredBackupWindow:
+    Description: 'The daily time range in UTC during which you want to create automated backups.'
+    Type: String
+    Default: '00:00-3:00'
+  PreferredMaintenanceWindow:
+    Description: The weekly time range (in UTC) during which system maintenance can occur.
+    Type: String
+    Default: 'sat:05:00-sat:07:00'
+
+  ENV:
+    Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
+    Type: String
+    Default: 'dev'
+    AllowedValues:
+    - 'dev'
+    - 'staging'
+    - 'prod'
+  SYS:
+    Description: 'Specify type System the resource is associated with this Resource (backend,frontend,both)'
+    Type: String
+    AllowedValues:
+    - 'backend'
+    - 'frontend'
+    - 'both'
+Mappings:
+  EngineVersionMap:
+    '3.2.6':
+      CacheParameterGroupFamily: 'redis3.2'
+    '4.0.10':
+      CacheParameterGroupFamily: 'redis4.0'
+    '5.0.0':
+      CacheParameterGroupFamily: 'redis5.0'
+    '5.0.4':
+      CacheParameterGroupFamily: 'redis5.0'
+Conditions:
+  HasClusterMode: !Equals [!Ref ClusterMode, true]
+  HasKmsKey: !Not [!Equals [!Ref ParentKmsKeyStack, '']]
+  HasSSHBastionSecurityGroup: !Not [!Equals [!Ref ParentSSHBastionStack, '']]
+  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
+  HasAuthToken: !Not [!Equals [!Ref AuthToken, '']]
+  HasSnapshotName: !Not [!Equals [!Ref SnapshotName, '']]
+  HasAutomaticFailoverEnabled: !Not [!Equals [!Ref NumReplicas, 0]]
+Resources:
+
+  CacheParameterGroup:
+    Type: 'AWS::ElastiCache::ParameterGroup'
+    Properties:
+      CacheParameterGroupFamily: !FindInMap [EngineVersionMap, !Ref EngineVersion, CacheParameterGroupFamily]
+      Description: !Ref 'AWS::StackName'
+      Properties: {
+        'cluster-enabled': !If [HasClusterMode, 'yes', 'no']
+      }
+  CacheSubnetGroupName:
+    Type: 'AWS::ElastiCache::SubnetGroup'
+    Properties:
+      Description: !Ref 'AWS::StackName'
+      SubnetIds: !Split [',', {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetsPrivate'}]
+  
+  # Security Group
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Ref 'AWS::StackName'
+      VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
+      SecurityGroupIngress:  # Access to ECS Cluster
+      - IpProtocol: tcp
+        FromPort: 6379
+        ToPort: 6379
+        SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentClusterStack}-SecurityGroup'}
+  SecurityGroupInSSHBastion:  # Access to Bastion Host
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Condition: HasSSHBastionSecurityGroup
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentSSHBastionStack}-SecurityGroup'}
+        
+  ReplicationGroup:
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    UpdatePolicy:
+      UseOnlineResharding: true
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      MultiAZEnabled: !Ref MultiAZ
+      ReplicationGroupDescription: !Ref 'AWS::StackName'
+      AtRestEncryptionEnabled: true
+      AuthToken: !If [HasAuthToken, !Ref AuthToken, !Ref 'AWS::NoValue']
+      AutomaticFailoverEnabled: !If [HasAutomaticFailoverEnabled, true, false]
+      CacheNodeType: !Ref CacheNodeType
+      CacheParameterGroupName: !Ref CacheParameterGroup
+      CacheSubnetGroupName: !Ref CacheSubnetGroupName
+      Engine: redis
+      EngineVersion: !Ref EngineVersion
+      KmsKeyId: !If [HasKmsKey, {'Fn::ImportValue': !Sub '${ParentKmsKeyStack}-KeyId'}, !Ref 'AWS::NoValue']
+      NotificationTopicArn: !If [HasAlertTopic, {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}, !Ref 'AWS::NoValue']
+      NumNodeGroups: !Ref NumShards
+      ReplicasPerNodeGroup: !Ref NumReplicas
+      SnapshotWindow: !Ref PreferredBackupWindow
+      PreferredMaintenanceWindow: !Ref PreferredMaintenanceWindow
+      SecurityGroupIds:
+      - !Ref SecurityGroup
+      SnapshotName: !If [HasSnapshotName, !Ref SnapshotName, !Ref 'AWS::NoValue']
+      SnapshotRetentionLimit: !Ref SnapshotRetentionLimit
+      TransitEncryptionEnabled: !Ref TransitEncryption
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+ 
+  # Alarms
+  Node1CPUUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/ElastiCache'
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: CacheClusterId
+        Value: !Sub '${ReplicationGroup}-001'
+  Node2CPUUtilizationTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average CPU utilization over last 10 minutes higher than 80%'
+      Namespace: 'AWS/ElastiCache'
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 80
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: CacheClusterId
+        Value: !Sub '${ReplicationGroup}-002'
+  Node1SwapUsageTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average swap usage over last 10 minutes higher than 64 MB, performance may suffer'
+      Namespace: 'AWS/ElastiCache'
+      MetricName: SwapUsage
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 67108864 # 64 MB in Bytes
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: CacheClusterId
+        Value: !Sub '${ReplicationGroup}-001'
+  Node2SwapUsageTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average swap usage over last 10 minutes higher than 64 MB, performance may suffer'
+      Namespace: 'AWS/ElastiCache'
+      MetricName: SwapUsage
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 67108864 # 64 MB in Bytes
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: CacheClusterId
+        Value: !Sub '${ReplicationGroup}-002'
+  Node1EvictionsTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average evictions over last 10 minutes higher than 1000, may enough memory for all keys'
+      Namespace: 'AWS/ElastiCache'
+      MetricName: Evictions
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 1000
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: CacheClusterId
+        Value: !Sub '${ReplicationGroup}-001'
+  Node2EvictionsTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average evictions over last 10 minutes higher than 1000, may enough memory for all keys'
+      Namespace: 'AWS/ElastiCache'
+      MetricName: Evictions
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 1000
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: CacheClusterId
+        Value: !Sub '${ReplicationGroup}-002'
+  Node1ReplicationLagTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average replication lag over last 10 minutes higher than 30 seconds'
+      Namespace: 'AWS/ElastiCache'
+      MetricName: ReplicationLag
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 30
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: CacheClusterId
+        Value: !Sub '${ReplicationGroup}-001'
+  Node2ReplicationLagTooHighAlarm:
+    Condition: HasAlertTopic
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: 'Average replication lag over last 10 minutes higher than 30 seconds'
+      Namespace: 'AWS/ElastiCache'
+      MetricName: ReplicationLag
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 30
+      AlarmActions:
+      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
+      Dimensions:
+      - Name: CacheClusterId
+        Value: !Sub '${ReplicationGroup}-002'
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'redis'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-StackName'
+  ClusterName:
+    Description: 'The name of the cluster'
+    Value: !Ref ReplicationGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterName'
+      
+  EndPointAddress:
+    Description: 'The DNS address of cache node.'
+    Value: !If [HasClusterMode, !GetAtt 'ReplicationGroup.ConfigurationEndPoint.Address', !GetAtt 'ReplicationGroup.PrimaryEndPoint.Address'] 
+    Export:
+      Name: !Sub '${AWS::StackName}-EndPointAddress'
+  EndPointPort:
+    Description: 'The port that the cache node is listening on.'
+    Value: !If [HasClusterMode, !GetAtt 'ReplicationGroup.ConfigurationEndPoint.Port', !GetAtt 'ReplicationGroup.PrimaryEndPoint.Port'] 
+    Export:
+      Name: !Sub '${AWS::StackName}-EndPointPort'

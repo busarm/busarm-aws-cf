@@ -1,0 +1,135 @@
+# Must be deployed in us-east-1 Region
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Deploys lambda which is triggered by aws sns to add security group which restrics Http access to the vpc to cloudfront only. Hence access to the VPC must go through Cloudfront always'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Resource Parameters'
+      Parameters:
+      - ResourceRegion 
+      - ResourceVpcId 
+    - Label:
+        default: 'Global Tags'
+      Parameters:
+      - ENV
+      - SYS
+Parameters:
+  ResourceRegion:
+    Type: String
+    Description: The region where the resource to be allowed is deployed
+    Default: eu-west-1
+  ResourceVpcId:
+    Type: String
+    Description: The VPC ID where the resource to be allowed is deployed
+  
+  ENV:
+    Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
+    Type: String
+    Default: 'dev'
+    AllowedValues:
+    - 'dev'
+    - 'staging'
+    - 'prod'
+  SYS:
+    Description: 'Specify type System the resource is associated with this Resource (backend,frontend,both)'
+    Type: String
+    AllowedValues:
+    - 'backend'
+    - 'frontend'
+    - 'both'
+  
+Conditions:
+  CreateResources: !Equals [!Ref "AWS::Region", us-east-1]
+
+Resources:
+
+  CreateAndUpdateSecurityGroupExecutionRole:
+    Condition: CreateResources
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+            - ec2:AuthorizeSecurityGroupIngress
+            - ec2:RevokeSecurityGroupIngress
+            - ec2:DeleteSecurityGroup
+            - ec2:CreateSecurityGroup
+            - ec2:DescribeSecurityGroups
+            - sns:Subscribe
+            Resource: "*"
+
+  CreateAndUpdateSecurityGroupFunction:
+    Condition: CreateResources
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Timeout: 300
+      Description: Used to update security groups for Route53 health check. Do not touch.
+      Role: !GetAtt CreateAndUpdateSecurityGroupExecutionRole.Arn
+      Environment:
+        Variables:
+          ResourceRegion: !Ref ResourceRegion
+          ResourceVpcId: !Ref ResourceVpcId
+      Code:
+        ZipFile: !Sub |
+                  const Region=process.env.ResourceRegion;const VpcId=process.env.ResourceVpcId;const AWS=require('aws-sdk');const GroupName='Cloudfront-SecurityGroup';const topicArn='arn:aws:sns:us-east-1:806199016981:AmazonIpSpaceChanged';const ipRangeFile='https://ip-ranges.amazonaws.com/ip-ranges.json';const finish={send:(event,context,responseStatus,responseData,physicalResourceId)=>{if(typeof event.RequestType!=='undefined'){const cfnResponse=require("cfn-response");return cfnResponse.send(event,context,responseStatus,responseData,physicalResourceId)}else{return context.done()}}};const response={FAILED:'FAILED',SUCCESS:'SUCCESS'};const fetch=(url)=>{return new Promise((resolve,reject)=>{const lib=url.startsWith('https')?require('https'):require('http');const request=lib.get(url,(response)=>{if(response.statusCode<200||response.statusCode>299){reject(new Error('Failed to load page, status code: '+response.statusCode))}const body=[];response.on('data',(chunk)=>body.push(chunk));response.on('end',()=>resolve(body.join('')))});request.on('error',(err)=>reject(err))})};const addIngressRules=(ec2,groupId,ips,callback)=>{const ipRanges=[];ips.map((ipAddress)=>{ipRanges.push({CidrIp:ipAddress})});ec2.authorizeSecurityGroupIngress({GroupId:groupId,IpPermissions:[{FromPort:'-1',IpProtocol:'-1',IpRanges:ipRanges,ToPort:'-1'}]}).promise().then(()=>{return callback(null,{})}).catch((err)=>{return callback(err,null)})};const allowIps=(ec2,groupId,callback)=>{fetch(ipRangeFile).then(response=>{let bodyAsJson=JSON.parse(response);let ipsToAllow=bodyAsJson.prefixes.filter(prefix=>prefix.service==='CLOUDFRONT').map(prefix=>prefix.ip_prefix);addIngressRules(ec2,groupId,ipsToAllow,()=>{return callback(null,{})})}).catch((err)=>{return callback(err)})};exports.handler=(event,context)=>{const RequestType=event.RequestType;AWS.config.update({region:'us-east-1'});const sns=new AWS.SNS();AWS.config.update({region:Region});sns.subscribe({Endpoint:context.invokedFunctionArn,Protocol:'lambda',TopicArn:topicArn}).promise().then(()=>{const ec2=new AWS.EC2();ec2.describeSecurityGroups({Filters:[{Name:'group-name',Values:[GroupName]}]}).promise().then((data)=>{if(data.SecurityGroups.length===0){ec2.createSecurityGroup({Description:'Add this security group to a resource to make it accesible by Cloudfront',GroupName:GroupName,VpcId:VpcId}).promise().then((data)=>{allowIps(ec2,data.GroupId,(err,data)=>{if(err!==null){return finish.send(event,context,response.FAILED,err)}return finish.send(event,context,response.SUCCESS,null,data.GroupId)})}).catch((err)=>{return finish.send(event,context,response.FAILED,err)})}else{const existingSecurityGroupId=data.SecurityGroups[0].GroupId;if(RequestType==='Delete'){ec2.deleteSecurityGroup({GroupId:existingSecurityGroupId}).promise().then(()=>{return finish.send(event,context,response.SUCCESS)}).catch((err)=>{return finish.send(event,context,response.FAILED,err)})}else{const updateSecurityGroup=()=>allowIps(ec2,existingSecurityGroupId,(err,data)=>{if(err!==null){return finish.send(event,context,response.FAILED,err)}return finish.send(event,context,response.SUCCESS,null,existingSecurityGroupId)});ec2.revokeSecurityGroupIngress({GroupId:existingSecurityGroupId,IpPermissions:[{FromPort:'-1',IpProtocol:'-1',IpRanges:typeof data.SecurityGroups[0].IpPermissions[0]!=='undefined'?data.SecurityGroups[0].IpPermissions[0].IpRanges:[],ToPort:'-1'}]}).promise().then(()=>{updateSecurityGroup()}).catch(()=>{updateSecurityGroup()})}}})}).catch((err)=>{return finish.send(event,context,response.FAILED,err)})};
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+      - Key: Name
+        Value: 'CreateAndUpdateSecurityGroupFunction'
+        
+  PermissionForEventsToInvokeLambda:
+    Condition: CreateResources
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CreateAndUpdateSecurityGroupFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: arn:aws:sns:us-east-1:806199016981:AmazonIpSpaceChanged
+
+  SecurityGroup:
+    DependsOn: PermissionForEventsToInvokeLambda
+    Type: Custom::SecurityGroup
+    Properties:
+      ServiceToken: !GetAtt CreateAndUpdateSecurityGroupFunction.Arn
+      Region: !Ref ResourceRegion
+      VpcId: !Ref ResourceVpcId
+
+Outputs:
+  TemplateID:
+    Description: 'Wecari template id'
+    Value: 'vpc-cdn'
+  TemplateVersion:
+    Description: 'Wecari template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-StackName'
