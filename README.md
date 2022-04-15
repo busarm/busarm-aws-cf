@@ -1,5 +1,5 @@
 # README #
-Based on https://cloudonaut.io" templates
+Based on [Cloudonaut](https://cloudonaut.io) templates
 ## Description
 - *alert.yaml*  - SNS Notification for AWS Infrastructure alerts
 - *alb.yaml* - Application Load Balance
