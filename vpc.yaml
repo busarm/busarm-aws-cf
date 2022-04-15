@@ -495,10 +495,10 @@ Resources:
 
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
+    Description: 'AWS Cloud Formation template id'
     Value: 'vpc'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'

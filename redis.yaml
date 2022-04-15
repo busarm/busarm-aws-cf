@@ -33,21 +33,21 @@ Metadata:
       - SYS
 Parameters:
   ParentVPCStack:
-    Description: 'Stack name of parent VPC stack based on wecari-vpc.yaml template.'
+    Description: 'Stack name of parent VPC stack based on vpc.yaml template.'
     Type: String 
   ParentClusterStack:
-    Description: 'Stack name of parent Cluster stack based on wecari-ecs.yaml template.'
+    Description: 'Stack name of parent Cluster stack based on ecs.yaml template.'
     Type: String
   ParentKmsKeyStack:
-    Description: 'Optional stack name of parent KMS key stack based on wecari-kms-key.yaml template.'
+    Description: 'Optional stack name of parent KMS key stack based on kms-key.yaml template.'
     Type: String
     Default: '' 
   ParentSSHBastionStack:
-    Description: 'Optional but recommended stack name of parent SSH bastion host/instance stack based on wecari-bastion.yaml template.'
+    Description: 'Optional but recommended stack name of parent SSH bastion host/instance stack based on bastion.yaml template.'
     Type: String
     Default: ''
   ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: ''
 
@@ -363,10 +363,10 @@ Resources:
         Value: !Sub '${ReplicationGroup}-002'
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
+    Description: 'AWS Cloud Formation template id'
     Value: 'redis'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'

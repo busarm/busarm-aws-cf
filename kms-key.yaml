@@ -13,7 +13,7 @@ Metadata:
       - Service
 Parameters:
   ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: ''
   Service:
@@ -120,10 +120,10 @@ Resources:
         Id: rule
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
+    Description: 'AWS Cloud Formation template id'
     Value: 'kms-key'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'

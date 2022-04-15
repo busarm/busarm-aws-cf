@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Application Load Balancer for Blue Green Deployment'
+Description: 'Application Load Balancer'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -22,10 +22,10 @@ Metadata:
       - SYS
 Parameters:
   ParentVPCStack:
-    Description: 'Stack name of parent VPC stack based on wecari-vpc.yaml template.'
+    Description: 'Stack name of parent VPC stack based on vpc.yaml template.'
     Type: String 
   ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: ''
 
@@ -99,22 +99,6 @@ Resources:
       IpProtocol: tcp
       FromPort: 80
       ToPort: 80
-      CidrIpv6: '::/0'
-  ALBSecurityGroupInHttpTestWorld:
-    Type: 'AWS::EC2::SecurityGroupIngress'
-    Properties:
-      GroupId: !Ref ALBSecurityGroup
-      IpProtocol: tcp
-      FromPort: 81
-      ToPort: 81
-      CidrIp: '0.0.0.0/0'
-  ALBSecurityGroupInHttpTestWorldIPv6:
-    Type: 'AWS::EC2::SecurityGroupIngress'
-    Properties:
-      GroupId: !Ref ALBSecurityGroup
-      IpProtocol: tcp
-      FromPort: 81
-      ToPort: 81
       CidrIpv6: '::/0'
   ALBSecurityGroupInHttpsWorld:
     Type: 'AWS::EC2::SecurityGroupIngress'
@@ -268,16 +252,6 @@ Resources:
       Port: 80
       Protocol: HTTP
 
-  HttpTestListener:
-    Type: 'AWS::ElasticLoadBalancingV2::Listener'
-    Properties:
-      DefaultActions:
-      - TargetGroupArn: !Ref DefaultTargetGroup
-        Type: forward
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 81
-      Protocol: HTTP
-
   HttpsListener:
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Condition: HasLoadBalancerCertificateArn
@@ -293,10 +267,10 @@ Resources:
  
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
-    Value: 'alb-bg'
+    Description: 'AWS Cloud Formation template id'
+    Value: 'alb'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'
@@ -326,11 +300,6 @@ Outputs:
     Value: !Ref HttpListener
     Export:
       Name: !Sub '${AWS::StackName}-HttpListener'
-  HttpTestListener:
-    Description: 'ALB HTTP Test listener for services.'
-    Value: !Ref HttpTestListener
-    Export:
-      Name: !Sub '${AWS::StackName}-HttpTestListener'
   HttpsListener:
     Condition: HasLoadBalancerCertificateArn
     Description: 'ALB HTTPS listener for services.'

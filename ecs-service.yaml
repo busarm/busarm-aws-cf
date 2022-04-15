@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ECS Service for Laravel with EFS Deployment'
+Description: 'ECS Service with Rolling Update Deployment'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -14,16 +14,17 @@ Metadata:
       Parameters:
       - LoadBalancerHostPattern
       - LoadBalancerPath
+      - LoadBalancerProirity
       - LoadBalancerHealthCheckPath
       - LoadBalancerHttps
       - LoadBalancerDeregistrationDelay
     - Label:
         default: 'Task Parameters'
       Parameters:
-      - PHPAPPImage
-      - PHPAPPMemory
-      - PHPWorkspaceImage
-      - PHPWorkspaceMemory
+      - Memory
+      - APPImage 
+      - APPContainerPort
+      - APPContainerPath
     - Label:
         default: 'Service Parameters'
       Parameters:
@@ -35,13 +36,13 @@ Metadata:
       - HealthCheckGracePeriod
 Parameters:
   ParentClusterStack:
-    Description: 'Stack name of parent Cluster stack based on wecari-ecs.yaml template.'
+    Description: 'Stack name of parent Cluster stack based on ecs.yaml template.'
     Type: String
   ParentALBStack:
-    Description: 'Stack name of parent applicaiton load balancer stack based on wecari-alb.yaml template.'
+    Description: 'Stack name of parent applicaiton load balancer stack based on alb.yaml template.'
     Type: String 
   ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: '' 
   LoadBalancerHostPattern:
@@ -56,6 +57,13 @@ Parameters:
     Default: 'service'
     ConstraintDescription: 'Must not be longer than 255'
     MaxLength: 255
+  LoadBalancerProirity:
+    Description: 'Optional priority of Load Balancer listener rule'
+    Type: Number
+    Default: 0
+    ConstraintDescription: 'Must be in the range [0-3600]'
+    MinValue: 0
+    MaxValue: 999
   LoadBalancerHealthCheckPath:
     Description: 'Optional path in service to perform health check on.  E.g., for ping, the health check path will be /ping.'
     Type: String
@@ -84,282 +92,153 @@ Parameters:
     MinValue: 0
     MaxValue: 3600
  
-  PHPAPPImage:
+  Memory:
+    Description: 'The maximum amount of memory to assign to this task. Must be lower that the available memory of the Instance'
+    Type: Number
+    Default: 256
+    AllowedValues:
+    - 64
+    - 128
+    - 192
+    - 256
+    - 320
+    - 384
+    - 448
+    - 512
+    - 576
+    - 640
+    - 704
+    - 768
+    - 832
+    - 896
+    - 960
+    - 1024
+    - 1088
+    - 1152
+    - 1216
+    - 1280
+    - 1344
+    - 1408
+    - 1472
+    - 1536
+    - 1600
+    - 1664
+    - 1728
+    - 1792
+    - 1856
+    - 1920
+    - 1984
+    - 2048
+    - 2112
+    - 2176
+    - 2240
+    - 2304
+    - 2368
+    - 2432
+    - 2496
+    - 2560
+    - 2624
+    - 2688
+    - 2752
+    - 2816
+    - 2880
+    - 2944
+    - 3008
+    - 3072
+    - 3136
+    - 3200
+    - 3264
+    - 3328
+    - 3392
+    - 3456
+    - 3520
+    - 3584
+    - 3648
+    - 3712
+    - 3776
+    - 3840
+    - 3904
+    - 3968
+    - 4032
+    - 4096
+    - 4160
+    - 4224
+    - 4288
+    - 4352
+    - 4416
+    - 4480
+    - 4544
+    - 4608
+    - 4672
+    - 4736
+    - 4800
+    - 4864
+    - 4928
+    - 4992
+    - 5056
+    - 5120
+    - 5184
+    - 5248
+    - 5312
+    - 5376
+    - 5440
+    - 5504
+    - 5568
+    - 5632
+    - 5696
+    - 5760
+    - 5824
+    - 5888
+    - 5952
+    - 6016
+    - 6080
+    - 6144
+    - 6208
+    - 6272
+    - 6336
+    - 6400
+    - 6464
+    - 6528
+    - 6592
+    - 6656
+    - 6720
+    - 6784
+    - 6848
+    - 6912
+    - 6976
+    - 7040
+    - 7104
+    - 7168
+    - 7232
+    - 7296
+    - 7360
+    - 7424
+    - 7488
+    - 7552
+    - 7616
+    - 7680
+    - 7744
+    - 7808
+    - 7872
+    - 7936
+    - 8000
+    - 8064
+    - 8128
+    - 8192  
+  APPImage:
     Description: 'The Name of the APP image to use for a container, which is passed directly to the Docker daemon. You can use images in the Docker Hub registry or specify other repositories (repository-url/image:tag).'
+    Type: String 
+  APPContainerPort:
+    Description: 'Port APP Container will be running on'
+    Type: Number 
+    Default: 80
+    MinValue: 1
+    MaxValue: 65535
+  APPContainerPath:
+    Description: 'Path to app in container image. e.g /var/www'
     Type: String
+    Default: "/var/www"
 
-  PHPAPPMemory:
-    Description: 'The maximum amount of memory to assign to the PHP APP container. Must be lower that the available memory of the Instance'
-    Type: Number
-    Default: 256
-    AllowedValues:
-    - 64
-    - 128
-    - 192
-    - 256
-    - 320
-    - 384
-    - 448
-    - 512
-    - 576
-    - 640
-    - 704
-    - 768
-    - 832
-    - 896
-    - 960
-    - 1024
-    - 1088
-    - 1152
-    - 1216
-    - 1280
-    - 1344
-    - 1408
-    - 1472
-    - 1536
-    - 1600
-    - 1664
-    - 1728
-    - 1792
-    - 1856
-    - 1920
-    - 1984
-    - 2048
-    - 2112
-    - 2176
-    - 2240
-    - 2304
-    - 2368
-    - 2432
-    - 2496
-    - 2560
-    - 2624
-    - 2688
-    - 2752
-    - 2816
-    - 2880
-    - 2944
-    - 3008
-    - 3072
-    - 3136
-    - 3200
-    - 3264
-    - 3328
-    - 3392
-    - 3456
-    - 3520
-    - 3584
-    - 3648
-    - 3712
-    - 3776
-    - 3840
-    - 3904
-    - 3968
-    - 4032
-    - 4096
-    - 4160
-    - 4224
-    - 4288
-    - 4352
-    - 4416
-    - 4480
-    - 4544
-    - 4608
-    - 4672
-    - 4736
-    - 4800
-    - 4864
-    - 4928
-    - 4992
-    - 5056
-    - 5120
-    - 5184
-    - 5248
-    - 5312
-    - 5376
-    - 5440
-    - 5504
-    - 5568
-    - 5632
-    - 5696
-    - 5760
-    - 5824
-    - 5888
-    - 5952
-    - 6016
-    - 6080
-    - 6144
-    - 6208
-    - 6272
-    - 6336
-    - 6400
-    - 6464
-    - 6528
-    - 6592
-    - 6656
-    - 6720
-    - 6784
-    - 6848
-    - 6912
-    - 6976
-    - 7040
-    - 7104
-    - 7168
-    - 7232
-    - 7296
-    - 7360
-    - 7424
-    - 7488
-    - 7552
-    - 7616
-    - 7680
-    - 7744
-    - 7808
-    - 7872
-    - 7936
-    - 8000
-    - 8064
-    - 8128
-    - 8192  
-  
-  PHPWorkspaceImage:
-    Description: 'The Name of the APP workspace image to use for a container, which is passed directly to the Docker daemon. You can use images in the Docker Hub registry or specify other repositories (repository-url/image:tag).'
-    Type: String
-
-  PHPWorkspaceMemory:
-    Description: 'The maximum amount of memory to assign to the PHP APP container. Must be lower that the available memory of the Instance'
-    Type: Number
-    Default: 256
-    AllowedValues:
-    - 64
-    - 128
-    - 192
-    - 256
-    - 320
-    - 384
-    - 448
-    - 512
-    - 576
-    - 640
-    - 704
-    - 768
-    - 832
-    - 896
-    - 960
-    - 1024
-    - 1088
-    - 1152
-    - 1216
-    - 1280
-    - 1344
-    - 1408
-    - 1472
-    - 1536
-    - 1600
-    - 1664
-    - 1728
-    - 1792
-    - 1856
-    - 1920
-    - 1984
-    - 2048
-    - 2112
-    - 2176
-    - 2240
-    - 2304
-    - 2368
-    - 2432
-    - 2496
-    - 2560
-    - 2624
-    - 2688
-    - 2752
-    - 2816
-    - 2880
-    - 2944
-    - 3008
-    - 3072
-    - 3136
-    - 3200
-    - 3264
-    - 3328
-    - 3392
-    - 3456
-    - 3520
-    - 3584
-    - 3648
-    - 3712
-    - 3776
-    - 3840
-    - 3904
-    - 3968
-    - 4032
-    - 4096
-    - 4160
-    - 4224
-    - 4288
-    - 4352
-    - 4416
-    - 4480
-    - 4544
-    - 4608
-    - 4672
-    - 4736
-    - 4800
-    - 4864
-    - 4928
-    - 4992
-    - 5056
-    - 5120
-    - 5184
-    - 5248
-    - 5312
-    - 5376
-    - 5440
-    - 5504
-    - 5568
-    - 5632
-    - 5696
-    - 5760
-    - 5824
-    - 5888
-    - 5952
-    - 6016
-    - 6080
-    - 6144
-    - 6208
-    - 6272
-    - 6336
-    - 6400
-    - 6464
-    - 6528
-    - 6592
-    - 6656
-    - 6720
-    - 6784
-    - 6848
-    - 6912
-    - 6976
-    - 7040
-    - 7104
-    - 7168
-    - 7232
-    - 7296
-    - 7360
-    - 7424
-    - 7488
-    - 7552
-    - 7616
-    - 7680
-    - 7744
-    - 7808
-    - 7872
-    - 7936
-    - 8000
-    - 8064
-    - 8128
-    - 8192  
-  
   DesiredCount:
     Description: 'The number of simultaneous tasks, that you want to run on the cluster. CF will also expect the total number of services to reach this amount before completing deployment'
     Type: Number
@@ -384,7 +263,6 @@ Parameters:
     Default: 2
     ConstraintDescription: 'Must be >= 1'
     MinValue: 1 
-
   HealthCheckGracePeriod:
     Description: 'The period of time, in seconds, that the Amazon ECS service scheduler ignores unhealthy Elastic Load Balancing target health checks after a task has first started.'
     Type: Number
@@ -419,7 +297,7 @@ Resources:
       VpcId: {'Fn::ImportValue': !Sub '${ParentClusterStack}-VPC'}
       TargetGroupAttributes:
       - Key: deregistration_delay.timeout_seconds
-        Value: !Ref LoadBalancerDeregistrationDela
+        Value: !Ref LoadBalancerDeregistrationDelay
 
   # ALB Listener Rules
   LoadBalancerHttpListenerRule: # HTTP
@@ -427,7 +305,7 @@ Resources:
     Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
     Properties:
       ListenerArn: {'Fn::ImportValue': !Sub '${ParentALBStack}-HttpListener'}
-      Priority: 1
+      Priority: !Ref LoadBalancerProirity
       Actions:
       - Type: forward
         TargetGroupArn: !Ref ECSServiceLoadBalancerTargetGroup
@@ -458,7 +336,7 @@ Resources:
     Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
     Properties:
       ListenerArn: {'Fn::ImportValue': !Sub '${ParentALBStack}-HttpsListener'}
-      Priority: 1
+      Priority: !Ref LoadBalancerProirity
       Actions:
       - Type: forward
         TargetGroupArn: !Ref ECSServiceLoadBalancerTargetGroup
@@ -491,60 +369,23 @@ Resources:
       Family: !Ref 'AWS::StackName'
       NetworkMode: bridge
       Memory: !Ref Memory
-      Volumes: 
-      - Name: php-app
-        Host:
-          SourcePath: !Sub
-          - '${EFSMountPath}/${StackName}/'
-          - EFSMountPath: {'Fn::ImportValue': !Sub '${ParentClusterStack}-EFSMountPath'}
-            StackName: !Sub '${AWS::StackName}'
+      Volumes:
+      - Name: app
+        DockerVolumeConfiguration:
+          Scope: task
+          Driver: local
       ContainerDefinitions:
       # App Container
-      - Name: !Ref PHPAPPImage # if you change this, you also must change the AWS::ECS::Service
-        Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${PHPAPPImage}
-        Memory: !Ref PHPAPPMemory
+      - Name: !Ref APPImage # if you change this, you also must change the AWS::ECS::Service
+        Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${APPImage}
         Essential: true 
         PortMappings:
-        - ContainerPort: 80 # if you change this, you also must change the AWS::ECS::Service
+        - ContainerPort: !Ref APPContainerPort # if you change this, you also must change the AWS::ECS::Service
           HostPort: 0 # 0 For Dynamic port mapping, needed to allow running multiple tasks
           Protocol: tcp 
         MountPoints:
-        - SourceVolume: 'php-app'
-          ContainerPath: '/var/www'
-        HealthCheck:
-          Command: 
-            - "CMD"
-            - "curl"
-            - "-f"
-            - "http://localhost"
-          Interval: 10
-          Retries: 3
-          StartPeriod: 30
-          Timeout: 30
-        LogConfiguration:
-          LogDriver: awslogs
-          Options:
-            'awslogs-region': !Ref 'AWS::Region'
-            'awslogs-group': {'Fn::ImportValue': !Sub '${ParentClusterStack}-LogGroup'}
-            'awslogs-stream-prefix': !Sub '${AWS::StackName}' 
-      
-      # App Workspace Container
-      - Name: !Ref PHPWorkspaceImage
-        Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${PHPWorkspaceImage}
-        Memory: !Ref PHPWorkspaceMemory
-        Essential: true 
-        DependsOn:
-        - Condition: HEALTHY
-          ContainerName: !Ref PHPAPPImage
-        Links:
-        - !Ref PHPAPPImage
-        PortMappings:
-        - ContainerPort: 22 # if you change this, you also must change the AWS::ECS::Service
-          HostPort: 0 # 0 For Dynamic port mapping, needed to allow running multiple tasks
-          Protocol: tcp 
-        MountPoints:
-        - SourceVolume: 'php-app'
-          ContainerPath: '/var/www'
+        - SourceVolume: 'app'
+          ContainerPath: !Ref APPContainerPath
         HealthCheck:
           Command: 
             - "CMD-SHELL"
@@ -561,7 +402,7 @@ Resources:
             'awslogs-group': {'Fn::ImportValue': !Sub '${ParentClusterStack}-LogGroup'}
             'awslogs-stream-prefix': !Sub '${AWS::StackName}' 
 
-  # ECS Service  
+  # ECS Service
   Service:
     Type: 'AWS::ECS::Service'
     Properties:
@@ -573,7 +414,7 @@ Resources:
         MaximumPercent: 200
         MinimumHealthyPercent: 50 
       DeploymentController: 
-        Type: CODE_DEPLOY
+        Type: ECS
       DesiredCount: !Ref DesiredCount
       HealthCheckGracePeriodSeconds: !Ref HealthCheckGracePeriod 
       PlacementStrategies:
@@ -584,11 +425,10 @@ Resources:
       SchedulingStrategy: REPLICA
       TaskDefinition: !Ref DefaultTaskDefinition
       LoadBalancers: 
-      - ContainerName: !Ref PHPAPPImage
-        ContainerPort: 80
+      - ContainerName: !Ref APPImage
+        ContainerPort: !Ref APPContainerPort
         TargetGroupArn: !Ref ECSServiceLoadBalancerTargetGroup 
         
-  
   # ECS Service Alarms and Notification
   CPUUtilizationTooHighAlarm:
     Condition: HasAlertTopic
@@ -650,7 +490,6 @@ Resources:
       - Arn: {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
         Id: rule
   
-
   # Service Auto Scaling
   ScalableTargetRole: # based on http://docs.aws.amazon.com/AmazonECS/latest/developerguide/autoscale_IAM_role.html
     Condition: HasAutoScaling
@@ -766,13 +605,13 @@ Resources:
       Threshold: 20
       AlarmActions:
       - !Ref ScaleDownPolicy
- 
+
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
-    Value: 'ecs-service-php-efs'
+    Description: 'AWS Cloud Formation template id'
+    Value: 'ecs-service'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'
@@ -788,7 +627,7 @@ Outputs:
     Description: 'ECS Service Load balancer Target Group'
     Value: !Ref ECSServiceLoadBalancerTargetGroup
     Export:
-      Name: !Sub '${AWS::StackName}-ServiceTargetGroup'
+      Name: !Sub '${AWS::StackName}-ServiceTargetGroup' 
   TaskDefinition:
     Description: 'ECS Service TaskDefinition'
     Value: !Ref DefaultTaskDefinition

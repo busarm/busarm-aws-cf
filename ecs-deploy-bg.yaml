@@ -43,13 +43,13 @@ Metadata:
       - SYS
 Parameters:
   ParentVPCStack:
-    Description: 'Stack name of parent VPC stack based on wecari-vpc.yaml template.'
+    Description: 'Stack name of parent VPC stack based on vpc.yaml template.'
     Type: String
   ParentALBStack:
-    Description: 'Stack name of parent applicaiton load balancer stack based on wecari-alb.yaml template.'
+    Description: 'Stack name of parent applicaiton load balancer stack based on alb.yaml template.'
     Type: String  
   ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: ''
 
@@ -436,10 +436,10 @@ Resources:
 
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
+    Description: 'AWS Cloud Formation template id'
     Value: 'ecs-bg-deploy'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'

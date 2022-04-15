@@ -34,11 +34,11 @@ Metadata:
       - SYS
 Parameters:
   ParentKmsKeyStack:
-    Description: 'Optional Stack name of parent KMS key stack based on wecari-kms-key.yaml template.'
+    Description: 'Optional Stack name of parent KMS key stack based on kms-key.yaml template.'
     Type: String
     Default: '' 
   ParentVpcEndpointStack:
-    Description: 'Optional Stack name of parent VPC endpoint stack based on wecari-vpc-endpoint-s3.yaml template (Required if Access := VpcEndpointRead).'
+    Description: 'Optional Stack name of parent VPC endpoint stack based on vpc-endpoint-s3.yaml template (Required if Access := VpcEndpointRead).'
     Type: String
     Default: ''
   BucketName:
@@ -364,10 +364,10 @@ Resources:
         Comment: !Ref Bucket
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
+    Description: 'AWS Cloud Formation template id'
     Value: 's3'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'

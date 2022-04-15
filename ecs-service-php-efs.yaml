@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ECS Service for Laravel with Rolling Update Deployment'
+Description: 'ECS Service for Laravel with EFS Deployment'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -33,16 +33,15 @@ Metadata:
       - MaxCapacity
       - MinCapacity
       - HealthCheckGracePeriod
-
 Parameters:
   ParentClusterStack:
-    Description: 'Stack name of parent Cluster stack based on wecari-ecs.yaml template.'
+    Description: 'Stack name of parent Cluster stack based on ecs.yaml template.'
     Type: String
   ParentALBStack:
-    Description: 'Stack name of parent applicaiton load balancer stack based on wecari-alb.yaml template.'
+    Description: 'Stack name of parent applicaiton load balancer stack based on alb.yaml template.'
     Type: String 
   ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: '' 
   LoadBalancerHostPattern:
@@ -223,13 +222,6 @@ Parameters:
     - 8128
     - 8192  
   
-  DesiredCount:
-    Description: 'The number of simultaneous tasks, that you want to run on the cluster. CF will also expect the total number of services to reach this amount before completing deployment'
-    Type: Number
-    Default: 2
-    ConstraintDescription: 'Must be >= 1'
-    MinValue: 1
-
   PHPWorkspaceImage:
     Description: 'The Name of the APP workspace image to use for a container, which is passed directly to the Docker daemon. You can use images in the Docker Hub registry or specify other repositories (repository-url/image:tag).'
     Type: String
@@ -392,13 +384,13 @@ Parameters:
     Default: 2
     ConstraintDescription: 'Must be >= 1'
     MinValue: 1 
+
   HealthCheckGracePeriod:
     Description: 'The period of time, in seconds, that the Amazon ECS service scheduler ignores unhealthy Elastic Load Balancing target health checks after a task has first started.'
     Type: Number
     Default: 60
     MinValue: 0
     MaxValue: 1800
-    
 Conditions:
   HasLoadBalancerHttps: !Equals [!Ref LoadBalancerHttps, 'true']
   HasLoadBalancerPath: !Not [!Equals [!Ref LoadBalancerPath, '']]
@@ -427,7 +419,7 @@ Resources:
       VpcId: {'Fn::ImportValue': !Sub '${ParentClusterStack}-VPC'}
       TargetGroupAttributes:
       - Key: deregistration_delay.timeout_seconds
-        Value: !Ref LoadBalancerDeregistrationDelay
+        Value: !Ref LoadBalancerDeregistrationDela
 
   # ALB Listener Rules
   LoadBalancerHttpListenerRule: # HTTP
@@ -498,11 +490,14 @@ Resources:
     Properties:
       Family: !Ref 'AWS::StackName'
       NetworkMode: bridge
-      Volumes:
+      Memory: !Ref Memory
+      Volumes: 
       - Name: php-app
-        DockerVolumeConfiguration:
-          Scope: task
-          Driver: local
+        Host:
+          SourcePath: !Sub
+          - '${EFSMountPath}/${StackName}/'
+          - EFSMountPath: {'Fn::ImportValue': !Sub '${ParentClusterStack}-EFSMountPath'}
+            StackName: !Sub '${AWS::StackName}'
       ContainerDefinitions:
       # App Container
       - Name: !Ref PHPAPPImage # if you change this, you also must change the AWS::ECS::Service
@@ -578,7 +573,7 @@ Resources:
         MaximumPercent: 200
         MinimumHealthyPercent: 50 
       DeploymentController: 
-        Type: ECS
+        Type: CODE_DEPLOY
       DesiredCount: !Ref DesiredCount
       HealthCheckGracePeriodSeconds: !Ref HealthCheckGracePeriod 
       PlacementStrategies:
@@ -593,6 +588,7 @@ Resources:
         ContainerPort: 80
         TargetGroupArn: !Ref ECSServiceLoadBalancerTargetGroup 
         
+  
   # ECS Service Alarms and Notification
   CPUUtilizationTooHighAlarm:
     Condition: HasAlertTopic
@@ -654,6 +650,7 @@ Resources:
       - Arn: {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
         Id: rule
   
+
   # Service Auto Scaling
   ScalableTargetRole: # based on http://docs.aws.amazon.com/AmazonECS/latest/developerguide/autoscale_IAM_role.html
     Condition: HasAutoScaling
@@ -769,13 +766,13 @@ Resources:
       Threshold: 20
       AlarmActions:
       - !Ref ScaleDownPolicy
-
+ 
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
-    Value: 'ecs-service-php'
+    Description: 'AWS Cloud Formation template id'
+    Value: 'ecs-service-php-efs'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'
@@ -791,7 +788,7 @@ Outputs:
     Description: 'ECS Service Load balancer Target Group'
     Value: !Ref ECSServiceLoadBalancerTargetGroup
     Export:
-      Name: !Sub '${AWS::StackName}-ServiceTargetGroup' 
+      Name: !Sub '${AWS::StackName}-ServiceTargetGroup'
   TaskDefinition:
     Description: 'ECS Service TaskDefinition'
     Value: !Ref DefaultTaskDefinition

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Continuous Delivery for Laravel Project using S3 as source and EFS as destination.'
+Description: 'Continuous Delivery to ECS for Laravel Project using Rolling Deployment'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -21,7 +21,9 @@ Metadata:
       - AWSAccessKey
       - AWSAccessSecret 
       - AWSRegion
-      - ENVFILE 
+      - AppImageName
+      - AppImageTag
+      - AppENVFile  
     - Label:
         default: 'CodePipeline Parameters'
       Parameters:
@@ -35,23 +37,23 @@ Metadata:
       - SYS
 Parameters:
   ParentVPCStack:
-    Description: 'Stack name of parent VPC stack based on wecari-vpc.yaml template.'
+    Description: 'Stack name of parent VPC stack based on vpc.yaml template.'
     Type: String
   ParentClusterStack:
-    Description: 'Stack name of parent Cluster stack based on wecari-ecs.yaml template.'
+    Description: 'Stack name of parent Cluster stack based on ecs.yaml template.'
     Type: String
   ParentClusterServiceStack:
-    Description: 'Stack name of parent Cluster service stack based on wecari-ecs-service-laradock.yaml template.'
+    Description: 'Stack name of parent Cluster service stack based on ecs-service-laradock.yaml template.'
     Type: String
   ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on wecari-alert.yaml template.'
+    Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: ''
 
   CodeBuildDesc:
     Description: 'Description of the CodeBuild Project'
     Type: String 
-    Default: 'Build Project to build Laravel project from S3 unto EFS File System'
+    Default: 'Build Project to build Laravel project from S3 onto and ECR Image'
   CacheBucketName:
     Description: 'Name of S3 Bucket to use to cache Codebuild dependencies. Ignore if you prefer not to cache'
     Type: String 
@@ -71,19 +73,27 @@ Parameters:
     - true
     - false
   SubnetsReach:
-    Description: 'Should the code build container have direct access to the Internet or do you prefer private subnets with NAT?'
+    Description: 'Should the code build container have access to the Internet ? If so, put it in a private subnet with NAT Gateway. If public, then no internet access'
     Type: String
     Default: Private
     AllowedValues:
     - Public
     - Private 
-  ENVFILE:
+  AppImageName:
+    Description: 'ECR Image Repo Name for App'
+    Type: String
+  AppImageTag:
+    Description: 'ECR Image Repo Tag for App'
+    Type: String 
+    Default: 'latest'   
+  AppENVFile:
     Description: 'Environment file to use when setting up Laravel Project. This env file will be copied into ".env" file. Use ".env.dev" for Development, ".env.prod" for Production'
     Type: String 
     Default: '.env.dev'
     AllowedValues:
     - '.env.dev'
     - '.env.prod'
+
   AWSAccessKey:
     Description: 'AWS Secret Manager reference for AWS Access Key for APP - with sufficient permissions like AWS Secret Manager, S3 etc. Format = secret-id:json-key:version-stage:version-id '
     Type: String 
@@ -149,6 +159,7 @@ Resources:
               - Action:
                 - 'logs:*'
                 - 's3:*'
+                - 'ecr:*'
                 - 'secretsmanager:*'
                 - 'ec2:CreateNetworkInterface'
                 - 'ec2:DescribeNetworkInterfaces'
@@ -171,67 +182,52 @@ Resources:
         Type: 'CODEPIPELINE'
         BuildSpec: !Sub | 
           version: 0.2
+          install:
+            runtime-versions:
+              docker: 18
+              php: 7.3
           phases:
-            install: 
-              runtime-versions:
-                php: 7.3 
-            pre_build: # commands to be run before build
+            pre_build:
               commands:
-              - echo AWS Version
-              - aws --version
+                - IMAGE_TAG=build-$(echo $CODEBUILD_BUILD_ID | awk -F":" '{print $2}')
+                - AppImageUrl=$AWS_ACCOUNT_ID.dkr.ecr.$AWSRegion.amazonaws.com/$AppImageName
 
-              - echo Backup old Project build
-              - mkdir -p $EFSPATH/backup # Create 'backup' folder for Project if doesn't exist
-              - rsync -aq --delete-after --exclude 'backup/' --exclude 'php-fpm/' --exclude 'nginx/' --exclude 'logs/' $EFSPATH/ $EFSPATH/backup/ # Sync current project into 'backup'
+                - echo Logging in to Amazon ECR...
+                - aws ecr get-login-password --region $AWSRegion | docker login --username AWS --password-stdin $AppImageUrl
 
-              - echo Sync without deleting extraneous destination files
-              - rsync -aq --exclude 'backup/' . $EFSPATH/ # Copy new without updating - Important to do this first and separetely for fresh installation and to prevent removing system generated files
-
-              - echo Use backup - forward all requests to backup if available
-              - echo `date` >> $EFSPATH/backup/.active
-              
-              - echo Sync and delete extraneous destination files
-              - rsync -aq --delete-after --exclude 'backup/' --exclude 'vendor/' --exclude 'storage/' --exclude 'public/' --exclude 'php-fpm/' --exclude 'nginx/' --exclude 'logs/' . $EFSPATH/
-              
-              - echo Update Permissions
-              - chmod -R -f 777 $EFSPATH/app $EFSPATH/public $EFSPATH/storage 
             build:
               commands:
-              - echo Build started on `date`
+                - echo Build started on `date` 
+                
+                - echo Installing composer..
+                - composer install
 
-              - echo Installing composer..
-              - cd $EFSPATH && composer install
+                - echo Creating and updating .env file..
+                - cp $AppENVFile .env
 
-              - echo Creating and updating .env file..
-              - cd $EFSPATH && cp $ENVFILE .env
+                - php artisan env:set AWS_ACCESS_KEY_ID=$AWSAccessKey -q
+                - php artisan env:set AWS_SECRET_ACCESS_KEY=$AWSAccessSecret -q
+                - php artisan env:set AWS_DEFAULT_REGION=$AWSRegion -q
 
-              - cd $EFSPATH && php artisan env:set AWS_ACCESS_KEY_ID=$AWSAccessKey -q
-              - cd $EFSPATH && php artisan env:set AWS_SECRET_ACCESS_KEY=$AWSAccessSecret -q
-              - cd $EFSPATH && php artisan env:set AWS_DEFAULT_REGION=$AWSRegion -q
-
-              - echo Generate Laravel APP Key
-              - cd $EFSPATH && php artisan key:generate -q
-
-              - echo Create Laravel Passport Keys if not available
-              - cd $EFSPATH && php artisan passport:keys -q
-
-              - echo Clear Cache
-              - cd $EFSPATH && php artisan route:clear -q
-              - cd $EFSPATH && php artisan config:clear -q
-              - cd $EFSPATH && php artisan cache:clear -q
-
-              - echo Generate secure configs
-              - cd $EFSPATH && php artisan config:secure -q
-
-              - echo Restart Queue to pick up on changes
-              - cd $EFSPATH && php artisan queue:restart -q
+                - echo Building the Docker image...          
+                - docker build -t $AppImageUrl:$AppImageTag .
+                - docker tag $AppImageUrl:$AppImageTag $AppImageUrl:$IMAGE_TAG
 
             post_build:
-              commands: 
-              - echo Stop using backup
-              - rm -f $EFSPATH/backup/.active
+              commands:
+                - echo Build completed on `date`
+                - echo Pushing the Docker image...
+                - docker push $AppImageUrl:$AppImageTag
+                - docker push $AppImageUrl:$IMAGE_TAG
+                - printf '[{"name":"%s", "imageUri":"%s"}]' $AppImageName $AppImageUrl:$IMAGE_TAG > imagedefinitions.json
 
-              - echo Build completed on `date`
+          artifacts:
+            files:
+              - imagedefinitions.json
+          cache:
+            paths:
+              - 'vendor/**/*'
+
         InsecureSsl: false
       SecondarySources: []
       SecondarySourceVersions: []
@@ -246,12 +242,18 @@ Resources:
         Image: aws/codebuild/standard:4.0
         ComputeType: BUILD_GENERAL1_SMALL
         EnvironmentVariables:
-        - Name: EFSPATH
-          Value: "/mnt/efs"
+        - Name: AWS_ACCOUNT_ID
+          Value: !Ref 'AWS::AccountId'
           Type: PLAINTEXT
-        - Name: ENVFILE
-          Value: !Ref ENVFILE
+        - Name: AppImageName
+          Value: !Ref AppImageName
           Type: PLAINTEXT
+        - Name: AppImageTag
+          Value: !Ref AppImageTag
+          Type: PLAINTEXT
+        - Name: AppENVFile
+          Value: !Ref AppENVFile
+          Type: PLAINTEXT  
         - Name: AWSAccessKey
           Value: !Ref AWSAccessKey
           Type: SECRETS_MANAGER
@@ -265,7 +267,7 @@ Resources:
         ImagePullCredentialsType: CODEBUILD
       ServiceRole: !Ref CodeBuildRole
       TimeoutInMinutes: 30
-      QueuedTimeoutInMinutes: 480
+      QueuedTimeoutInMinutes: 60
       Tags:
       - Key: ENV
         Value: !Ref ENV
@@ -273,7 +275,7 @@ Resources:
         Value: !Ref SYS
       VpcConfig:
         VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
-        Subnets:
+        Subnets: 
         - !If [HasAZA, {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetA${SubnetsReach}'}, !Ref 'AWS::NoValue']
         - !If [HasAZB, {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetB${SubnetsReach}'}, !Ref 'AWS::NoValue']
         SecurityGroupIds:
@@ -287,18 +289,8 @@ Resources:
         S3Logs:
           Status: DISABLED
           EncryptionDisabled: false
-      FileSystemLocations:
-      - Type: EFS
-        Location: !Sub
-          - '${EFSId}.efs.${Region}.amazonaws.com:/${StackName}'
-          - EFSId: {'Fn::ImportValue': !Sub '${ParentClusterStack}-EFS'}
-            Region: !Sub '${AWS::Region}'
-            StackName: {'Fn::ImportValue': !Sub '${ParentClusterServiceStack}-StackName'}
-        MountPoint: "/mnt/efs"
-        Identifier: 'APP_EFS'
-        MountOptions: nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2
 
-
+  
   # CodePipeline Role
   CodePipelineRole:
       Type: AWS::IAM::Role
@@ -316,13 +308,21 @@ Resources:
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
-                - Action:
+                - Action: 
                   - 'logs:*'
                   - 's3:*'
                   - 'events:*'
                   - 'codestar:*'
-                  - 'codebuild:BatchGetBuilds'
-                  - 'codebuild:StartBuild'
+                  - 'kms:*'
+                  - 'ecs:*'
+                  - 'sns:*'
+                  - 'cloudwatch:*'
+                  - 'codebuild:*'
+                  - 'codedeploy:*' 
+                  Resource: "*"
+                  Effect: Allow
+                - Action:
+                  - 'iam:PassRole' 
                   Resource: "*"
                   Effect: Allow
 
@@ -339,6 +339,7 @@ Resources:
       - Name: Source
         Actions:
         - Name: Source
+          Region: !Ref 'AWS::Region'
           ActionTypeId:
             Category: Source
             Owner: AWS
@@ -349,14 +350,14 @@ Resources:
             PollForSourceChanges: true
             S3Bucket: !Ref SourceBucketName
             S3ObjectKey: !Ref SourceBucketKey
+          InputArtifacts: []
           OutputArtifacts:
           - Name: SourceArtifact
-          InputArtifacts: []
-          Region: ap-southeast-1
           Namespace: SourceVariables
       - Name: Build
         Actions:
         - Name: Build
+          Region: !Ref 'AWS::Region'
           ActionTypeId:
             Category: Build
             Owner: AWS
@@ -365,13 +366,29 @@ Resources:
           RunOrder: 1
           Configuration:
             ProjectName: !Ref   CodeBuildProject
-          OutputArtifacts:
-          - Name: BuildArtifact
           InputArtifacts:
           - Name: SourceArtifact
-          Region: !Ref 'AWS::Region'
+          OutputArtifacts:
+          - Name: BuildArtifact
           Namespace: BuildVariables
-  
+      - Name: Deploy
+        Actions:
+        - Name: Deploy
+          Region: !Ref 'AWS::Region'
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: ECS
+            Version: '1'
+          RunOrder: 1
+          Configuration: 
+            ClusterName: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+            ServiceName: {'Fn::ImportValue': !Sub '${ParentClusterServiceStack}-Service'}
+            FileName: 'imagedefinitions.json'
+          InputArtifacts:
+          - Name: BuildArtifact 
+          Namespace: DeployVariables
+
   # Code Pipeline Notification Rule
   CodepipelinedNotificationRule:
     Type: 'AWS::CodeStarNotifications::NotificationRule'
@@ -386,14 +403,13 @@ Resources:
       Targets: 
       - TargetType: SNS 
         TargetAddress: {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-  
-
+        
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
-    Value: 'ecs-efs-deploy'
+    Description: 'AWS Cloud Formation template id'
+    Value: 'ecs-bg-deploy'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'
@@ -411,7 +427,7 @@ Outputs:
     Value: !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${CodeBuildProject}"
     Export:
       Name: !Sub '${AWS::StackName}-CodeBuildProjectArn'
-
+ 
   CodePipeline:
     Description: 'Name of CodePipeline'
     Value: !Ref CodePipeline

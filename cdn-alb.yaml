@@ -21,7 +21,7 @@ Metadata:
       - SYS
 Parameters:
   ParentALBStack:
-    Description: 'Stack name of parent applicaiton load balancer stack based on wecari-alb.yaml template.'
+    Description: 'Stack name of parent applicaiton load balancer stack based on alb.yaml template.'
     Type: String 
     
   ALBProtocolPolicy:
@@ -108,10 +108,10 @@ Resources:
         Value: !Ref SYS
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
+    Description: 'AWS Cloud Formation template id'
     Value: 'cdn-alb'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'

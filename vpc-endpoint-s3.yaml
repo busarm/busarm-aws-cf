@@ -9,7 +9,7 @@ Metadata:
       - ParentVPCStack
 Parameters:
   ParentVPCStack:
-    Description: Stack name of parent VPC stack based on wecari-vpc.yaml template.
+    Description: Stack name of parent VPC stack based on vpc.yaml template.
     Type: String
 Resources:
   EndpointS3:
@@ -20,10 +20,10 @@ Resources:
       VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
 Outputs:
   TemplateID:
-    Description: 'Wecari template id'
+    Description: 'AWS Cloud Formation template id'
     Value: 'vpc-endpoint-s3'
   TemplateVersion:
-    Description: 'Wecari template version.'
+    Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
   StackName:
     Description: 'Stack name.'
