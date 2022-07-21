@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ECS Service for Laravel with Rolling Update Deployment'
+Description: 'ECS Service for PHP App with Rolling Update Deployment'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:

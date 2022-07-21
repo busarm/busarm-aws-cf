@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Continuous Delivery for Laravel Project using S3 as source and EFS as destination.'
+Description: 'CI/CD - Build & Deploy (Rolling) to ECS with VPC support from external source like Github'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -7,27 +7,31 @@ Metadata:
         default: 'Parent Stacks'
       Parameters:
       - ParentVPCStack 
-      - ParentClusterStack 
-      - ParentClusterServiceStack 
       - ParentAlertStack
     - Label:
         default: 'CodeBuild Parameters'
       Parameters:
-      - CodeBuildDesc
-      - CacheBucketName
       - AZA
       - AZB
       - SubnetsReach
-      - AWSAccessKey
-      - AWSAccessSecret 
-      - AWSRegion
-      - ENVFILE 
+      - CodeBuildDesc
+      - CodeBuildSpec
+      - CacheBucketName
+      - ConcurrentBuildLimit
+      - TimeoutInMinutes
+      - QueuedTimeoutInMinutes
+      - ImageDefinitionFileName
+      - AppImageName
+      - AppImageTag
+      - AppSpecFile
+      - AppTaskDefinitionFile
     - Label:
         default: 'CodePipeline Parameters'
       Parameters:
       - ArtifactBucketName
-      - SourceBucketName
-      - SourceBucketKey
+      - SourceConnectionArn
+      - SourceRepoId
+      - SourceBranchName
     - Label:
         default: 'Global Tags'
       Parameters:
@@ -37,25 +41,11 @@ Parameters:
   ParentVPCStack:
     Description: 'Stack name of parent VPC stack based on vpc.yaml template.'
     Type: String
-  ParentClusterStack:
-    Description: 'Stack name of parent Cluster stack based on ecs.yaml template.'
-    Type: String
-  ParentClusterServiceStack:
-    Description: 'Stack name of parent Cluster service stack based on ecs-service-laradock.yaml template.'
-    Type: String
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: ''
 
-  CodeBuildDesc:
-    Description: 'Description of the CodeBuild Project'
-    Type: String 
-    Default: 'Build Project to build Laravel project from S3 unto EFS File System'
-  CacheBucketName:
-    Description: 'Name of S3 Bucket to use to cache Codebuild dependencies. Ignore if you prefer not to cache'
-    Type: String 
-    Default: ''
   AZA:
     Description: 'Use Availability Zone A (Choose at least one AZ)'
     Type: String
@@ -71,40 +61,70 @@ Parameters:
     - true
     - false
   SubnetsReach:
-    Description: 'Should the code build container have direct access to the Internet or do you prefer private subnets with NAT?'
+    Description: 'Should the code build container have access to the Internet ? If so, put it in a private subnet with NAT Gateway. If public, then no internet access'
     Type: String
     Default: Private
     AllowedValues:
     - Public
     - Private 
-  ENVFILE:
-    Description: 'Environment file to use when setting up Laravel Project. This env file will be copied into ".env" file. Use ".env.dev" for Development, ".env.prod" for Production'
+  CodeBuildDesc:
+    Description: 'Description of the CodeBuild Project'
     Type: String 
-    Default: '.env.dev'
-    AllowedValues:
-    - '.env.dev'
-    - '.env.prod'
-  AWSAccessKey:
-    Description: 'AWS Secret Manager reference for AWS Access Key for APP - with sufficient permissions like AWS Secret Manager, S3 etc. Format = secret-id:json-key:version-stage:version-id '
+    Default: 'Build Project to build app from external source'
+  CodeBuildSpec:
+    Description: 'The build specification for the project. e.g myspec.yml. If empty, then the source code must contain a buildspec.yml file at the root level.'
     Type: String 
-  AWSAccessSecret:
-    Description: 'AWS Secret Manager reference for AWS Access Secret APP - with sufficient permissions like AWS Secret Manager, S3 etc. Format = secret-id:json-key:version-stage:version-id '
+    Default: 'buildspec.yml'
+  CacheBucketName:
+    Description: 'Name of S3 Bucket to use to cache Codebuild dependencies. Ignore if you prefer not to cache'
     Type: String 
-  AWSRegion:
-    Description: 'Default AWS Region for APP'
+    Default: ''
+  ConcurrentBuildLimit:
+    Description: 'Max number of concurrent builds to allow'
+    Type: Number 
+    Default: 1
+  TimeoutInMinutes:
+    Description: 'Max build timeout in minuites'
+    Type: Number 
+    Default: 30
+  QueuedTimeoutInMinutes:
+    Description: 'Max build queue timeout in minuites'
+    Type: Number 
+    Default: 10
+  ImageDefinitionFileName:
+    Description: 'Image definition artifact file name produced after build complete'
     Type: String 
-    Default: 'ap-southeast-1' 
+    Default: 'imagedefinitions.json'
+    
+  AppImageName:
+    Description: 'ECR Image Repo Name for App'
+    Type: String
+  AppImageTag:
+    Description: 'ECR Image Repo Tag for App'
+    Type: String 
+    Default: 'latest' 
+  AppSpecFile:
+    Description: 'App Specification file for the App, found in the project root directory'
+    Type: String 
+    Default: 'appspec.yaml'
+  AppTaskDefinitionFile:
+    Description: 'App Task Definition file for ECS Service, found in the project root directory'
+    Type: String 
+    Default: 'taskdef.json'
 
   ArtifactBucketName:
     Description: 'Name of S3 Bucket to use to store Pipeline Artifacts'
     Type: String 
-  SourceBucketName:
-    Description: 'Name of S3 Bucket that holds the Source Codes. Note: This bucket must support Versioning'
+  SourceConnectionArn:
+    Description: 'Arn for source connection. e.g arn:aws:codestar-connections:eu-west-2:xxxxxx:connection/xxxxxxxx-xxxx-xxxxx-xxxx. See https://console.aws.amazon.com/codesuite/settings/connections to create new connection'
     Type: String 
-  SourceBucketKey:
-    Description: 'Object name or path in S3 Bucket that holds Source Codes. Do not include (/) infront. e.g dev/Sample.zip or Sample.zip'
+  SourceRepoId:
+    Description: 'Source owner/repo. e.g gadana1/my-web-app-v1'
     Type: String 
-
+  SourceBranchName:
+    Description: 'Source brance name to deploy. e.g master'
+    Type: String
+    
   ENV:
     Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
     Type: String
@@ -122,9 +142,9 @@ Parameters:
     - 'both'
   
 Conditions:
-  HasCacheBucketName: !Not [!Equals [!Ref CacheBucketName, '']]
   HasAZA: !Equals [!Ref AZA, 'true']
   HasAZB: !Equals [!Ref AZB, 'true']
+  HasCacheBucketName: !Not [!Equals [!Ref CacheBucketName, '']]
   HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
 
 Resources:
@@ -149,15 +169,8 @@ Resources:
               - Action:
                 - 'logs:*'
                 - 's3:*'
+                - 'ecr:*'
                 - 'secretsmanager:*'
-                - 'ec2:CreateNetworkInterface'
-                - 'ec2:DescribeNetworkInterfaces'
-                - 'ec2:DeleteNetworkInterface'
-                - 'ec2:DescribeSubnets'
-                - 'ec2:DescribeSecurityGroups'
-                - 'ec2:DescribeDhcpOptions'
-                - 'ec2:DescribeVpcs'
-                - 'ec2:CreateNetworkInterfacePermission'
                 Effect: Allow
                 Resource: '*'
 
@@ -169,69 +182,7 @@ Resources:
       Description: !Ref CodeBuildDesc
       Source:
         Type: 'CODEPIPELINE'
-        BuildSpec: !Sub | 
-          version: 0.2
-          phases:
-            install: 
-              runtime-versions:
-                php: 7.3 
-            pre_build: # commands to be run before build
-              commands:
-              - echo AWS Version
-              - aws --version
-
-              - echo Backup old Project build
-              - mkdir -p $EFSPATH/backup # Create 'backup' folder for Project if doesn't exist
-              - rsync -aq --delete-after --exclude 'backup/' --exclude 'php-fpm/' --exclude 'nginx/' --exclude 'logs/' $EFSPATH/ $EFSPATH/backup/ # Sync current project into 'backup'
-
-              - echo Sync without deleting extraneous destination files
-              - rsync -aq --exclude 'backup/' . $EFSPATH/ # Copy new without updating - Important to do this first and separetely for fresh installation and to prevent removing system generated files
-
-              - echo Use backup - forward all requests to backup if available
-              - echo `date` >> $EFSPATH/backup/.active
-              
-              - echo Sync and delete extraneous destination files
-              - rsync -aq --delete-after --exclude 'backup/' --exclude 'vendor/' --exclude 'storage/' --exclude 'public/' --exclude 'php-fpm/' --exclude 'nginx/' --exclude 'logs/' . $EFSPATH/
-              
-              - echo Update Permissions
-              - chmod -R -f 777 $EFSPATH/app $EFSPATH/public $EFSPATH/storage 
-            build:
-              commands:
-              - echo Build started on `date`
-
-              - echo Installing composer..
-              - cd $EFSPATH && composer install
-
-              - echo Creating and updating .env file..
-              - cd $EFSPATH && cp $ENVFILE .env
-
-              - cd $EFSPATH && php artisan env:set AWS_ACCESS_KEY_ID=$AWSAccessKey -q
-              - cd $EFSPATH && php artisan env:set AWS_SECRET_ACCESS_KEY=$AWSAccessSecret -q
-              - cd $EFSPATH && php artisan env:set AWS_DEFAULT_REGION=$AWSRegion -q
-
-              - echo Generate Laravel APP Key
-              - cd $EFSPATH && php artisan key:generate -q
-
-              - echo Create Laravel Passport Keys if not available
-              - cd $EFSPATH && php artisan passport:keys -q
-
-              - echo Clear Cache
-              - cd $EFSPATH && php artisan route:clear -q
-              - cd $EFSPATH && php artisan config:clear -q
-              - cd $EFSPATH && php artisan cache:clear -q
-
-              - echo Generate secure configs
-              - cd $EFSPATH && php artisan config:secure -q
-
-              - echo Restart Queue to pick up on changes
-              - cd $EFSPATH && php artisan queue:restart -q
-
-            post_build:
-              commands: 
-              - echo Stop using backup
-              - rm -f $EFSPATH/backup/.active
-
-              - echo Build completed on `date`
+        BuildSpec: !Ref CodeBuildSpec
         InsecureSsl: false
       SecondarySources: []
       SecondarySourceVersions: []
@@ -243,29 +194,19 @@ Resources:
         Location: !If [HasCacheBucketName, !Sub '${CacheBucketName}/${AWS::StackName}', !Ref 'AWS::NoValue']
       Environment:
         Type: LINUX_CONTAINER
-        Image: aws/codebuild/standard:4.0
+        Image: aws/codebuild/standard:5.0
         ComputeType: BUILD_GENERAL1_SMALL
         EnvironmentVariables:
-        - Name: EFSPATH
-          Value: "/mnt/efs"
-          Type: PLAINTEXT
-        - Name: ENVFILE
-          Value: !Ref ENVFILE
-          Type: PLAINTEXT
-        - Name: AWSAccessKey
-          Value: !Ref AWSAccessKey
-          Type: SECRETS_MANAGER
-        - Name: AWSAccessSecret
-          Value: !Ref AWSAccessSecret
-          Type: SECRETS_MANAGER
-        - Name: AWSRegion
-          Value: !Ref AWSRegion
-          Type: PLAINTEXT
+        - Name: AWS_ACCOUNT_ID
+          Value: !Ref 'AWS::AccountId'
+        - Name: AWS_REGION
+          Value: !Ref 'AWS::Region'
         PrivilegedMode: true
         ImagePullCredentialsType: CODEBUILD
       ServiceRole: !Ref CodeBuildRole
-      TimeoutInMinutes: 30
-      QueuedTimeoutInMinutes: 480
+      TimeoutInMinutes: !Ref TimeoutInMinutes
+      QueuedTimeoutInMinutes: !Ref QueuedTimeoutInMinutes
+      ConcurrentBuildLimit:  !Ref ConcurrentBuildLimit
       Tags:
       - Key: ENV
         Value: !Ref ENV
@@ -273,7 +214,7 @@ Resources:
         Value: !Ref SYS
       VpcConfig:
         VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
-        Subnets:
+        Subnets: 
         - !If [HasAZA, {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetA${SubnetsReach}'}, !Ref 'AWS::NoValue']
         - !If [HasAZB, {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetB${SubnetsReach}'}, !Ref 'AWS::NoValue']
         SecurityGroupIds:
@@ -282,23 +223,12 @@ Resources:
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
-          GroupName: aws-codebuild
-          StreamName: !Sub '${AWS::StackName}'
+          GroupName: !Sub 'aws/codebuild/${AWS::StackName}'
         S3Logs:
           Status: DISABLED
           EncryptionDisabled: false
-      FileSystemLocations:
-      - Type: EFS
-        Location: !Sub
-          - '${EFSId}.efs.${Region}.amazonaws.com:/${StackName}'
-          - EFSId: {'Fn::ImportValue': !Sub '${ParentClusterStack}-EFS'}
-            Region: !Sub '${AWS::Region}'
-            StackName: {'Fn::ImportValue': !Sub '${ParentClusterServiceStack}-StackName'}
-        MountPoint: "/mnt/efs"
-        Identifier: 'APP_EFS'
-        MountOptions: nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2
 
-
+  
   # CodePipeline Role
   CodePipelineRole:
       Type: AWS::IAM::Role
@@ -316,13 +246,21 @@ Resources:
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
-                - Action:
+                - Action: 
                   - 'logs:*'
                   - 's3:*'
                   - 'events:*'
                   - 'codestar:*'
-                  - 'codebuild:BatchGetBuilds'
-                  - 'codebuild:StartBuild'
+                  - 'kms:*'
+                  - 'ecs:*'
+                  - 'sns:*'
+                  - 'cloudwatch:*'
+                  - 'codebuild:*'
+                  - 'codedeploy:*' 
+                  Resource: "*"
+                  Effect: Allow
+                - Action:
+                  - 'iam:PassRole' 
                   Resource: "*"
                   Effect: Allow
 
@@ -339,24 +277,26 @@ Resources:
       - Name: Source
         Actions:
         - Name: Source
+          Region: !Ref 'AWS::Region'
           ActionTypeId:
             Category: Source
             Owner: AWS
-            Provider: S3
+            Provider: CodeStarSourceConnection
             Version: '1'
           RunOrder: 1
           Configuration:
-            PollForSourceChanges: true
-            S3Bucket: !Ref SourceBucketName
-            S3ObjectKey: !Ref SourceBucketKey
+            ConnectionArn: !Ref SourceConnectionArn
+            FullRepositoryId: !Ref SourceRepoId
+            BranchName: !Ref SourceBranchName
+            OutputArtifactFormat: "CODE_ZIP"
+          InputArtifacts: []
           OutputArtifacts:
           - Name: SourceArtifact
-          InputArtifacts: []
-          Region: ap-southeast-1
           Namespace: SourceVariables
       - Name: Build
         Actions:
         - Name: Build
+          Region: !Ref 'AWS::Region'
           ActionTypeId:
             Category: Build
             Owner: AWS
@@ -364,14 +304,30 @@ Resources:
             Version: '1'
           RunOrder: 1
           Configuration:
-            ProjectName: !Ref   CodeBuildProject
-          OutputArtifacts:
-          - Name: BuildArtifact
+            ProjectName: !Ref CodeBuildProject
           InputArtifacts:
           - Name: SourceArtifact
-          Region: !Ref 'AWS::Region'
+          OutputArtifacts:
+          - Name: BuildArtifact
           Namespace: BuildVariables
-  
+      - Name: Deploy
+        Actions:
+        - Name: Deploy
+          Region: !Ref 'AWS::Region'
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: ECS
+            Version: '1'
+          RunOrder: 1
+          Configuration: 
+            ClusterName: {'Fn::ImportValue': !Sub '${ParentClusterStack}-Cluster'}
+            ServiceName: {'Fn::ImportValue': !Sub '${ParentClusterServiceStack}-Service'}
+            FileName: !Ref ImageDefinitionFileName
+          InputArtifacts:
+          - Name: BuildArtifact 
+          Namespace: DeployVariables
+
   # Code Pipeline Notification Rule
   CodepipelinedNotificationRule:
     Type: 'AWS::CodeStarNotifications::NotificationRule'
@@ -386,12 +342,11 @@ Resources:
       Targets: 
       - TargetType: SNS 
         TargetAddress: {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-  
-
+        
 Outputs:
   TemplateID:
     Description: 'AWS Cloud Formation template id'
-    Value: 'ecs-efs-deploy'
+    Value: 'ecs-bg-deploy'
   TemplateVersion:
     Description: 'AWS Cloud Formation template version.'
     Value: '1.0'
@@ -411,7 +366,7 @@ Outputs:
     Value: !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${CodeBuildProject}"
     Export:
       Name: !Sub '${AWS::StackName}-CodeBuildProjectArn'
-
+ 
   CodePipeline:
     Description: 'Name of CodePipeline'
     Value: !Ref CodePipeline

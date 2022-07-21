@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ECS Service for Laravel with Blue/Green Deployment'
+Description: 'ECS Service for PHP App with Blue/Green Deployment'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:

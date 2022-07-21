@@ -1,0 +1,48 @@
+version: 0.2
+install:
+  runtime-versions:
+    docker: 18
+    php: 7.3
+phases:
+  pre_build:
+    commands:
+      - IMAGE_TAG=build-$(echo $CODEBUILD_BUILD_ID | awk -F":" '{print $2}')
+      - AppImageUrl=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$AppImageName
+
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AppImageUrl
+
+  build:
+    commands:
+      - echo Build started on `date` 
+      
+      - echo Installing composer..
+      - composer install
+
+      - echo Creating and updating .env file..
+      - cp $AppENVFile .env
+
+      - php artisan env:set AWS_ACCESS_KEY_ID=$AWSAccessKey -q
+      - php artisan env:set AWS_SECRET_ACCESS_KEY=$AWSAccessSecret -q
+      - php artisan env:set AWS_DEFAULT_REGION=$AWS_REGION -q
+
+      - echo Building the Docker image...          
+      - docker build -t $AppImageUrl:$AppImageTag .
+      - docker tag $AppImageUrl:$AppImageTag $AppImageUrl:$IMAGE_TAG
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker image...
+      - docker push $AppImageUrl:$AppImageTag
+      - docker push $AppImageUrl:$IMAGE_TAG
+      - printf '{"ImageURI":"%s"}' $AppImageUrl:$IMAGE_TAG > imageDetail.json
+
+artifacts:
+  files:
+    - imageDetail.json
+    - $AppSpecFile
+    - $AppTaskDefinitionFile
+cache:
+  paths:
+    - 'vendor/**/*'

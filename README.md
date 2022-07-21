@@ -7,17 +7,21 @@ Based on [Cloudonaut](https://cloudonaut.io) templates
 - *cdn-alb.yaml* - Cloudfront Distribution Network with Application Load Balancer as origin
 - *cdn-s3.yaml* - Cloudfront Distribution Network with S3 Bucket as origin (Using S3 Cloudformation Stack)
 - *cdn-s3-bucket.yaml* - Cloudfront Distribution Network with S3 Bucket as origin (using S3 Bucket Name)
+- *cicd-build-ext* - CI/CD - Build only from external source like Github
+- *cicd-build-vpc-ext* - CI/CD - Build only with VPC support from external source like Github
+- *cicd-deploy-vpc-ext-ecs-bg* - CI/CD - Build & Deploy (Blue/Green) to ECS with VPC support from external source like Github
+- *cicd-deploy-vpc-ext-ecs* - CI/CD - Build & Deploy (Rolling) to ECS with VPC support from external source like Github
 - *ecs.yaml* - ECS Cluster of EC2 instances in an Auto Scaling Group
 - *ecs-efs.yaml* - ECS Cluster of EC2 instances in an Auto Scaling Group With EFS for Code storage
 - *ecs-service.yaml* - ECS Service Rolling Update Deployment
 - *ecs-service-php.yaml* - ECS Service for Laravel with Rolling Update Deployment
-- *ecs-deploy.yaml* -Continuous Delivery to ECS for Laravel Project using Rolling Deployment
 - *ecs-service-php-bg.yaml* - ECS Service for Laravel with Blue/Green Deployment
-- *ecs-deploy-bg.yaml* - Continuous Delivery to ECS for Laravel Project using Blue / Green Deployment
 - *ecs-service-php-efs.yaml* - ECS Service for Laravel with EFS Deployment
-- *ecs-deploy-efs.yaml* - Continuous Delivery for Laravel Project using S3 as source and EFS as destination
 - *ecs-service-logzio* - ECS Service for Logz.io logzio-mysql-logs collector. Used to forward mysql logs to Logz.io
 - *kms-key.yaml* - Create KMS Key for Encryption e.g Database Encryption
+- *laravel-ecs-deploy-bg.yaml* - Continuous Delivery to ECS for Laravel Project using Blue / Green Deployment
+- *laravel-ecs-deploy-efs.yaml* - Continuous Delivery for Laravel Project using S3 as source and EFS as destination
+- *laravel-ecs-deploy.yaml* -Continuous Delivery to ECS for Laravel Project using Rolling Deployment
 - *rds-mysql.yaml* - RDS MYSQL Database
 - *redis.yaml* - Elastic Cache Redis
 - *s3.yaml* - S3 Bucket

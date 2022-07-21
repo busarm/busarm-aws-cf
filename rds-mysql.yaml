@@ -201,6 +201,7 @@ Resources:
       StorageEncrypted: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !If [HasKmsKey, true, false]]
       VPCSecurityGroups:
       - !Ref DatabaseSecurityGroup
+      DeletionProtection: true
       Tags:
       - Key: ENV
         Value: !Ref ENV

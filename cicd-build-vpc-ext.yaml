@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Continuous Delivery to ECS for Laravel Project using Rolling Deployment'
+Description: 'CI/CD - Build only with VPC support from external source like Github'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -7,29 +7,26 @@ Metadata:
         default: 'Parent Stacks'
       Parameters:
       - ParentVPCStack 
-      - ParentClusterStack 
-      - ParentClusterServiceStack 
       - ParentAlertStack
     - Label:
         default: 'CodeBuild Parameters'
       Parameters:
-      - CodeBuildDesc
-      - CacheBucketName
       - AZA
       - AZB
       - SubnetsReach
-      - AWSAccessKey
-      - AWSAccessSecret 
-      - AWSRegion
-      - AppImageName
-      - AppImageTag
-      - AppENVFile  
+      - CodeBuildDesc
+      - CodeBuildSpec
+      - CacheBucketName
+      - ConcurrentBuildLimit
+      - TimeoutInMinutes
+      - QueuedTimeoutInMinutes
     - Label:
         default: 'CodePipeline Parameters'
       Parameters:
       - ArtifactBucketName
-      - SourceBucketName
-      - SourceBucketKey
+      - SourceConnectionArn
+      - SourceRepoId
+      - SourceBranchName
     - Label:
         default: 'Global Tags'
       Parameters:
@@ -39,25 +36,11 @@ Parameters:
   ParentVPCStack:
     Description: 'Stack name of parent VPC stack based on vpc.yaml template.'
     Type: String
-  ParentClusterStack:
-    Description: 'Stack name of parent Cluster stack based on ecs.yaml template.'
-    Type: String
-  ParentClusterServiceStack:
-    Description: 'Stack name of parent Cluster service stack based on ecs-service-laradock.yaml template.'
-    Type: String
   ParentAlertStack:
     Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
     Type: String
     Default: ''
 
-  CodeBuildDesc:
-    Description: 'Description of the CodeBuild Project'
-    Type: String 
-    Default: 'Build Project to build Laravel project from S3 onto and ECR Image'
-  CacheBucketName:
-    Description: 'Name of S3 Bucket to use to cache Codebuild dependencies. Ignore if you prefer not to cache'
-    Type: String 
-    Default: ''
   AZA:
     Description: 'Use Availability Zone A (Choose at least one AZ)'
     Type: String
@@ -79,42 +62,44 @@ Parameters:
     AllowedValues:
     - Public
     - Private 
-  AppImageName:
-    Description: 'ECR Image Repo Name for App'
-    Type: String
-  AppImageTag:
-    Description: 'ECR Image Repo Tag for App'
+  CodeBuildDesc:
+    Description: 'Description of the CodeBuild Project'
     Type: String 
-    Default: 'latest'   
-  AppENVFile:
-    Description: 'Environment file to use when setting up Laravel Project. This env file will be copied into ".env" file. Use ".env.dev" for Development, ".env.prod" for Production'
+    Default: 'Build Project to build app from external source'
+  CodeBuildSpec:
+    Description: 'The build specification for the project. e.g myspec.yml. If empty, then the source code must contain a buildspec.yml file at the root level.'
     Type: String 
-    Default: '.env.dev'
-    AllowedValues:
-    - '.env.dev'
-    - '.env.prod'
-
-  AWSAccessKey:
-    Description: 'AWS Secret Manager reference for AWS Access Key for APP - with sufficient permissions like AWS Secret Manager, S3 etc. Format = secret-id:json-key:version-stage:version-id '
+    Default: 'buildspec.yml'
+  CacheBucketName:
+    Description: 'Name of S3 Bucket to use to cache Codebuild dependencies. Ignore if you prefer not to cache'
     Type: String 
-  AWSAccessSecret:
-    Description: 'AWS Secret Manager reference for AWS Access Secret APP - with sufficient permissions like AWS Secret Manager, S3 etc. Format = secret-id:json-key:version-stage:version-id '
-    Type: String 
-  AWSRegion:
-    Description: 'Default AWS Region for APP'
-    Type: String 
-    Default: 'ap-southeast-1' 
+    Default: ''
+  ConcurrentBuildLimit:
+    Description: 'Max number of concurrent builds to allow'
+    Type: Number 
+    Default: 1
+  TimeoutInMinutes:
+    Description: 'Max build timeout in minuites'
+    Type: Number 
+    Default: 30
+  QueuedTimeoutInMinutes:
+    Description: 'Max build queue timeout in minuites'
+    Type: Number 
+    Default: 10
 
   ArtifactBucketName:
     Description: 'Name of S3 Bucket to use to store Pipeline Artifacts'
     Type: String 
-  SourceBucketName:
-    Description: 'Name of S3 Bucket that holds the Source Codes. Note: This bucket must support Versioning'
+  SourceConnectionArn:
+    Description: 'Arn for source connection. e.g arn:aws:codestar-connections:eu-west-2:xxxxxx:connection/xxxxxxxx-xxxx-xxxxx-xxxx. See https://console.aws.amazon.com/codesuite/settings/connections to create new connection'
     Type: String 
-  SourceBucketKey:
-    Description: 'Object name or path in S3 Bucket that holds Source Codes. Do not include (/) infront. e.g dev/Sample.zip or Sample.zip'
+  SourceRepoId:
+    Description: 'Source owner/repo. e.g gadana1/my-web-app-v1'
     Type: String 
-
+  SourceBranchName:
+    Description: 'Source brance name to deploy. e.g master'
+    Type: String
+    
   ENV:
     Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
     Type: String
@@ -132,9 +117,9 @@ Parameters:
     - 'both'
   
 Conditions:
-  HasCacheBucketName: !Not [!Equals [!Ref CacheBucketName, '']]
   HasAZA: !Equals [!Ref AZA, 'true']
   HasAZB: !Equals [!Ref AZB, 'true']
+  HasCacheBucketName: !Not [!Equals [!Ref CacheBucketName, '']]
   HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
 
 Resources:
@@ -161,14 +146,6 @@ Resources:
                 - 's3:*'
                 - 'ecr:*'
                 - 'secretsmanager:*'
-                - 'ec2:CreateNetworkInterface'
-                - 'ec2:DescribeNetworkInterfaces'
-                - 'ec2:DeleteNetworkInterface'
-                - 'ec2:DescribeSubnets'
-                - 'ec2:DescribeSecurityGroups'
-                - 'ec2:DescribeDhcpOptions'
-                - 'ec2:DescribeVpcs'
-                - 'ec2:CreateNetworkInterfacePermission'
                 Effect: Allow
                 Resource: '*'
 
@@ -180,54 +157,7 @@ Resources:
       Description: !Ref CodeBuildDesc
       Source:
         Type: 'CODEPIPELINE'
-        BuildSpec: !Sub | 
-          version: 0.2
-          install:
-            runtime-versions:
-              docker: 18
-              php: 7.3
-          phases:
-            pre_build:
-              commands:
-                - IMAGE_TAG=build-$(echo $CODEBUILD_BUILD_ID | awk -F":" '{print $2}')
-                - AppImageUrl=$AWS_ACCOUNT_ID.dkr.ecr.$AWSRegion.amazonaws.com/$AppImageName
-
-                - echo Logging in to Amazon ECR...
-                - aws ecr get-login-password --region $AWSRegion | docker login --username AWS --password-stdin $AppImageUrl
-
-            build:
-              commands:
-                - echo Build started on `date` 
-                
-                - echo Installing composer..
-                - composer install
-
-                - echo Creating and updating .env file..
-                - cp $AppENVFile .env
-
-                - php artisan env:set AWS_ACCESS_KEY_ID=$AWSAccessKey -q
-                - php artisan env:set AWS_SECRET_ACCESS_KEY=$AWSAccessSecret -q
-                - php artisan env:set AWS_DEFAULT_REGION=$AWSRegion -q
-
-                - echo Building the Docker image...          
-                - docker build -t $AppImageUrl:$AppImageTag .
-                - docker tag $AppImageUrl:$AppImageTag $AppImageUrl:$IMAGE_TAG
-
-            post_build:
-              commands:
-                - echo Build completed on `date`
-                - echo Pushing the Docker image...
-                - docker push $AppImageUrl:$AppImageTag
-                - docker push $AppImageUrl:$IMAGE_TAG
-                - printf '[{"name":"%s", "imageUri":"%s"}]' $AppImageName $AppImageUrl:$IMAGE_TAG > imagedefinitions.json
-
-          artifacts:
-            files:
-              - imagedefinitions.json
-          cache:
-            paths:
-              - 'vendor/**/*'
-
+        BuildSpec: !Ref CodeBuildSpec
         InsecureSsl: false
       SecondarySources: []
       SecondarySourceVersions: []
@@ -239,35 +169,19 @@ Resources:
         Location: !If [HasCacheBucketName, !Sub '${CacheBucketName}/${AWS::StackName}', !Ref 'AWS::NoValue']
       Environment:
         Type: LINUX_CONTAINER
-        Image: aws/codebuild/standard:4.0
+        Image: aws/codebuild/standard:5.0
         ComputeType: BUILD_GENERAL1_SMALL
         EnvironmentVariables:
         - Name: AWS_ACCOUNT_ID
           Value: !Ref 'AWS::AccountId'
-          Type: PLAINTEXT
-        - Name: AppImageName
-          Value: !Ref AppImageName
-          Type: PLAINTEXT
-        - Name: AppImageTag
-          Value: !Ref AppImageTag
-          Type: PLAINTEXT
-        - Name: AppENVFile
-          Value: !Ref AppENVFile
-          Type: PLAINTEXT  
-        - Name: AWSAccessKey
-          Value: !Ref AWSAccessKey
-          Type: SECRETS_MANAGER
-        - Name: AWSAccessSecret
-          Value: !Ref AWSAccessSecret
-          Type: SECRETS_MANAGER
-        - Name: AWSRegion
-          Value: !Ref AWSRegion
-          Type: PLAINTEXT
+        - Name: AWS_REGION
+          Value: !Ref 'AWS::Region'
         PrivilegedMode: true
         ImagePullCredentialsType: CODEBUILD
       ServiceRole: !Ref CodeBuildRole
-      TimeoutInMinutes: 30
-      QueuedTimeoutInMinutes: 60
+      TimeoutInMinutes: !Ref TimeoutInMinutes
+      QueuedTimeoutInMinutes: !Ref QueuedTimeoutInMinutes
+      ConcurrentBuildLimit:  !Ref ConcurrentBuildLimit
       Tags:
       - Key: ENV
         Value: !Ref ENV
@@ -284,8 +198,7 @@ Resources:
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
-          GroupName: aws-codebuild
-          StreamName: !Sub '${AWS::StackName}'
+          GroupName: !Sub 'aws/codebuild/${AWS::StackName}'
         S3Logs:
           Status: DISABLED
           EncryptionDisabled: false
@@ -343,13 +256,14 @@ Resources:
           ActionTypeId:
             Category: Source
             Owner: AWS
-            Provider: S3
+            Provider: CodeStarSourceConnection
             Version: '1'
           RunOrder: 1
           Configuration:
-            PollForSourceChanges: true
-            S3Bucket: !Ref SourceBucketName
-            S3ObjectKey: !Ref SourceBucketKey
+            ConnectionArn: !Ref SourceConnectionArn
+            FullRepositoryId: !Ref SourceRepoId
+            BranchName: !Ref SourceBranchName
+            OutputArtifactFormat: "CODE_ZIP"
           InputArtifacts: []
           OutputArtifacts:
           - Name: SourceArtifact
@@ -365,7 +279,7 @@ Resources:
             Version: '1'
           RunOrder: 1
           Configuration:
-            ProjectName: !Ref   CodeBuildProject
+            ProjectName: !Ref CodeBuildProject
           InputArtifacts:
           - Name: SourceArtifact
           OutputArtifacts:
