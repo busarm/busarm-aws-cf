@@ -112,14 +112,22 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Action:
+                - 'iam:*'
                 - 'logs:*'
                 - 's3:*'
                 - 'ecr:*'
                 - 'ssm:*'
                 - 'sns:*'
+                - 'sqs:*'
+                - 'events:*'
+                - 'lambda:*'
+                - 'apigateway:*'
                 - 'cloudwatch:*'
                 - 'cloudformation:*'
                 - 'secretsmanager:*'
+                - 'codedeploy:*'
+                - 'codedeploy:*'
+                - 'codepipeline:*'
                 Effect: Allow
                 Resource: '*'
 
