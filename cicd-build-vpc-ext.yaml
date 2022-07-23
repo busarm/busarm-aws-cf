@@ -145,6 +145,7 @@ Resources:
                 - 'logs:*'
                 - 's3:*'
                 - 'ecr:*'
+                - 'ssm:*'
                 - 'cloudwatch:*'
                 - 'secretsmanager:*'
                 - 'ec2:CreateNetworkInterface'

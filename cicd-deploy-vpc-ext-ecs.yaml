@@ -170,6 +170,7 @@ Resources:
                 - 'logs:*'
                 - 's3:*'
                 - 'ecr:*'
+                - 'ssm:*'
                 - 'cloudwatch:*'
                 - 'secretsmanager:*'
                 Effect: Allow
