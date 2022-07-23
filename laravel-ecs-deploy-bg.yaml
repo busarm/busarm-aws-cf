@@ -306,7 +306,7 @@ Resources:
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
-          GroupName: !Sub 'aws/codebuild/${AWS::StackName}'
+          GroupName: !Sub "/cicd/codebuild/${AWS::StackName}"
         S3Logs:
           Status: DISABLED
           EncryptionDisabled: false
@@ -336,7 +336,6 @@ Resources:
                   - 'kms:*'
                   - 'ecs:*'
                   - 'sns:*'
-                  - 'cloudwatch:*'
                   - 'codebuild:*'
                   - 'codedeploy:*' 
                   Resource: "*"
@@ -419,7 +418,7 @@ Resources:
     Type: 'AWS::CodeStarNotifications::NotificationRule'
     Condition: HasAlertTopic
     Properties:
-      Name: !Sub ${CodePipeline}-Notification-Rule
+      Name: !Sub '${AWS::StackName}-Notification-Rule'
       DetailType: FULL
       Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}"
       EventTypeIds: 
