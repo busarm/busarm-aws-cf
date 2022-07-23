@@ -116,7 +116,9 @@ Resources:
                 - 's3:*'
                 - 'ecr:*'
                 - 'ssm:*'
+                - 'sns:*'
                 - 'cloudwatch:*'
+                - 'cloudformation:*'
                 - 'secretsmanager:*'
                 Effect: Allow
                 Resource: '*'
