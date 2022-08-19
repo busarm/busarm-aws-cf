@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'RDS MySQL'
+Description: 'RDS MySQL for 2 AZs VPC and deployed on a private subnet'
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
@@ -7,15 +7,16 @@ Metadata:
         default: 'Parent Stacks'
       Parameters:
       - ParentVPCStack
-      - AppSecurityGroupId
       - ParentKmsKeyStack
       - ParentSSHBastionStack
       - ParentAlertStack
+      - AppSecurityGroupId
     - Label:
         default: 'RDS Parameters'
       Parameters:
       - DBSnapshotIdentifier
       - EngineVersion
+      - DBStorageType
       - DBAllocatedStorage
       - DBInstanceClass
       - DBInstanceIdentifier
@@ -24,8 +25,11 @@ Metadata:
       - DBMasterUsername
       - DBMasterUserPassword
       - DBMultiAZ
+      - DBDefaultAZ
       - DBOptionGroupName
       - DBParameterGroupName
+      - DeletionProtection
+      - StorageEncrypted
       - PreferredBackupWindow
       - PreferredMaintenanceWindow
       - EnableIAMDatabaseAuthentication
@@ -54,6 +58,11 @@ Parameters:
     Description: 'Application security group id to connect to the db'
     Type: String
 
+  DBStorageType:
+    Description: 'Specifies the storage type to be associated with the DB instance.'
+    Type: String
+    Default: 'gp2'
+    AllowedValues: ['standard', 'gp2','io1']
   DBSnapshotIdentifier:
     Description: 'Optional name or Amazon Resource Name (ARN) of the DB snapshot from which you want to restore (leave blank to create an empty database).'
     Type: String
@@ -96,6 +105,11 @@ Parameters:
     Type: String
     Default: true
     AllowedValues: [true, false]
+  DBDefaultAZ:
+    Description: 'If DB MultiAZ is false. Specify what default AZ to use'
+    Type: String
+    Default: 'a'
+    AllowedValues: ['a', 'b']
   DBOptionGroupName:
     Description: 'Optional name of an existing DB option group.'
     Type: String
@@ -104,6 +118,16 @@ Parameters:
     Description: 'Optional name of an existing DB parameter group.'
     Type: String
     Default: '' 
+  DeletionProtection:
+    Description: 'Enable or Disable DB deletion protection'
+    Type: String
+    Default: true
+    AllowedValues: [true, false]
+  StorageEncrypted:
+    Description: 'Enable or Disable DB storage encryption. This value is ignored if DBSnapshotIdentifier or ParentKmsKeyStack is available'
+    Type: String
+    Default: true
+    AllowedValues: [true, false]
   PreferredBackupWindow:
     Description: 'The daily time range in UTC during which you want to create automated backups.'
     Type: String
@@ -139,6 +163,7 @@ Parameters:
     - 'frontend'
     - 'both'
 Conditions:
+  HasMultiAZ: !Equals [!Ref DBMultiAZ, 'true']
   HasKmsKey: !Not [!Equals [!Ref ParentKmsKeyStack, '']]
   HasSSHBastionSecurityGroup: !Not [!Equals [!Ref ParentSSHBastionStack, '']]
   HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
@@ -152,12 +177,20 @@ Resources:
     Properties:
       GroupDescription: !Ref 'AWS::StackName'
       VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
-      SecurityGroupIngress: # Access to ECS Cluster
+      SecurityGroupIngress: # APP Access
       - IpProtocol: tcp
         FromPort: 3306
         ToPort: 3306
         SourceSecurityGroupId: !Ref AppSecurityGroupId
-  DatabaseSecurityGroupInSSHBastion:  # Access to Bastion Host
+  DatabaseSecurityGroupInVPC:  # VPC Default Access
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-SecurityGroup'}
+  DatabaseSecurityGroupInSSHBastion:  # Bastion Host Access
     Type: 'AWS::EC2::SecurityGroupIngress'
     Condition: HasSSHBastionSecurityGroup
     Properties:
@@ -166,6 +199,7 @@ Resources:
       FromPort: 3306
       ToPort: 3306
       SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentSSHBastionStack}-SecurityGroup'}
+
   DBSubnetGroup:
     Type: 'AWS::RDS::DBSubnetGroup'
     Properties:
@@ -197,11 +231,12 @@ Resources:
       OptionGroupName: !If [HasDBOptionGroupName, !Ref DBOptionGroupName, !Ref 'AWS::NoValue']
       PreferredBackupWindow: !Ref PreferredBackupWindow
       PreferredMaintenanceWindow: !Ref PreferredMaintenanceWindow
-      StorageType: gp2
-      StorageEncrypted: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !If [HasKmsKey, true, false]]
+      StorageType: !Ref DBStorageType
+      DeletionProtection: !Ref DeletionProtection
+      StorageEncrypted: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !If [HasKmsKey, true, !Ref StorageEncrypted]]
       VPCSecurityGroups:
       - !Ref DatabaseSecurityGroup
-      DeletionProtection: true
+      AvailabilityZone: !If [HasMultiAZ, !Ref 'AWS::NoValue', !Sub "${AWS::Region}${DBDefaultAZ}"]
       Tags:
       - Key: ENV
         Value: !Ref ENV

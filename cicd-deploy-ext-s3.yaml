@@ -1,19 +1,15 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "CI/CD - Build only with VPC support from external source like Github"
+Description: "CI/CD - Build & Deploy to S3 from external source like Github"
 Metadata:
     "AWS::CloudFormation::Interface":
         ParameterGroups:
             - Label:
                   default: "Parent Stacks"
               Parameters:
-                  - ParentVPCStack
                   - ParentAlertStack
             - Label:
                   default: "CodeBuild Parameters"
               Parameters:
-                  - AZA
-                  - AZB
-                  - SubnetsReach
                   - CodeBuildDesc
                   - CodeBuildSpec
                   - CacheBucketName
@@ -27,41 +23,20 @@ Metadata:
                   - SourceConnectionArn
                   - SourceRepoId
                   - SourceBranchName
+                  - DeployS3BucketName
+                  - DeployS3ObjectKey
+                  - DeployS3Extract
             - Label:
                   default: "Global Tags"
               Parameters:
                   - ENV
                   - SYS
 Parameters:
-    ParentVPCStack:
-        Description: "Stack name of parent VPC stack based on vpc.yaml template."
-        Type: String
     ParentAlertStack:
         Description: "Optional but recommended stack name of parent alert stack based on alert.yaml template."
         Type: String
         Default: ""
 
-    AZA:
-        Description: "Use Availability Zone A (Choose at least one AZ)"
-        Type: String
-        Default: true
-        AllowedValues:
-            - true
-            - false
-    AZB:
-        Description: "Use Availability Zone B (Choose at least one AZ)"
-        Type: String
-        Default: true
-        AllowedValues:
-            - true
-            - false
-    SubnetsReach:
-        Description: "Should the code build container have access to the Internet ? If so, put it in a private subnet with NAT Gateway. If public, then no internet access"
-        Type: String
-        Default: Private
-        AllowedValues:
-            - Public
-            - Private
     CodeBuildDesc:
         Description: "Description of the CodeBuild Project"
         Type: String
@@ -100,6 +75,21 @@ Parameters:
         Description: "Source brance name to deploy. e.g master"
         Type: String
 
+    DeployS3BucketName:
+        Description: "S3 bucket to deploy application to. e.g my-app-eu"
+        Type: String
+    DeployS3ObjectKey:
+        Description: "Optional: Unique S3 object key (without leading or traling slash). Required if DeployS3Extract = false. e.g MySite"
+        Type: String
+        Default: ""
+    DeployS3Extract:
+        Description: "If true, specifies that files are to be extracted before upload. Otherwise, application files remain zipped for upload"
+        Type: String
+        Default: true
+        AllowedValues:
+            - true
+            - false
+
     ENV:
         Description: "Specify Environment to deploy Resource (dev,staging,prod)"
         Type: String
@@ -117,10 +107,10 @@ Parameters:
             - "both"
 
 Conditions:
-    HasAZA: !Equals [!Ref AZA, "true"]
-    HasAZB: !Equals [!Ref AZB, "true"]
     HasCacheBucketName: !Not [!Equals [!Ref CacheBucketName, ""]]
     HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, ""]]
+    HasDeployS3Extract: !Equals [!Ref DeployS3Extract, true]
+
 
 Resources:
     # Codebuild Role
@@ -157,7 +147,6 @@ Resources:
                                 - "codedeploy:*"
                                 - "codedeploy:*"
                                 - "codepipeline:*"
-                                - "ec2:*"
                             Effect: Allow
                             Resource: "*"
 
@@ -199,21 +188,6 @@ Resources:
                   Value: !Ref ENV
                 - Key: SYS
                   Value: !Ref SYS
-            VpcConfig:
-                VpcId: { "Fn::ImportValue": !Sub "${ParentVPCStack}-VPC" }
-                Subnets:
-                    - !If [
-                          HasAZA,
-                          { "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetA${SubnetsReach}" },
-                          !Ref "AWS::NoValue",
-                      ]
-                    - !If [
-                          HasAZB,
-                          { "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetB${SubnetsReach}" },
-                          !Ref "AWS::NoValue",
-                      ]
-                SecurityGroupIds:
-                    - { "Fn::ImportValue": !Sub "${ParentVPCStack}-SecurityGroup" }
             BadgeEnabled: false
             LogsConfig:
                 CloudWatchLogs:
@@ -304,6 +278,23 @@ Resources:
                         OutputArtifacts:
                             - Name: BuildArtifact
                         Namespace: BuildVariables
+                - Name: Deploy
+                  Actions:
+                      - Name: Deploy
+                        Region: !Ref "AWS::Region"
+                        ActionTypeId:
+                            Category: Deploy
+                            Owner: AWS
+                            Provider: S3
+                            Version: "1"
+                        RunOrder: 1
+                        Configuration:
+                            BucketName: !Ref DeployS3BucketName
+                            ObjectKey: !If [HasDeployS3Extract, !Ref "AWS::NoValue", !Ref DeployS3ObjectKey] 
+                            Extract: !Ref DeployS3Extract
+                        InputArtifacts:
+                            - Name: BuildArtifact
+                        Namespace: DeployVariables
 
     # Code Pipeline Notification Rule
     CodepipelinedNotificationRule:
