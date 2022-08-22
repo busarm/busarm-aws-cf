@@ -1,414 +1,574 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'RDS MySQL for 2 AZs VPC and deployed on a private subnet'
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "RDS MySQL for 2 AZs VPC and deployed on a private subnet"
 Metadata:
-  'AWS::CloudFormation::Interface':
-    ParameterGroups:
-    - Label:
-        default: 'Parent Stacks'
-      Parameters:
-      - ParentVPCStack
-      - ParentKmsKeyStack
-      - ParentSSHBastionStack
-      - ParentAlertStack
-      - AppSecurityGroupId
-    - Label:
-        default: 'RDS Parameters'
-      Parameters:
-      - DBSnapshotIdentifier
-      - EngineVersion
-      - DBStorageType
-      - DBAllocatedStorage
-      - DBInstanceClass
-      - DBInstanceIdentifier
-      - DBName
-      - DBBackupRetentionPeriod
-      - DBMasterUsername
-      - DBMasterUserPassword
-      - DBMultiAZ
-      - DBDefaultAZ
-      - DBOptionGroupName
-      - DBParameterGroupName
-      - DeletionProtection
-      - StorageEncrypted
-      - PreferredBackupWindow
-      - PreferredMaintenanceWindow
-      - EnableIAMDatabaseAuthentication
-    - Label:
-        default: 'Global Tags'
-      Parameters:
-      - ENV
-      - SYS
+    "AWS::CloudFormation::Interface":
+        ParameterGroups:
+            - Label:
+                  default: "Parent Stacks"
+              Parameters:
+                  - ParentVPCStack
+                  - ParentKmsKeyStack
+                  - ParentSSHBastionStack
+                  - ParentAlertStack
+            - Label:
+                  default: "Client Secrurity Groups"
+              Parameters:
+                  - Client1SecurityGroupId
+                  - Client2SecurityGroupId
+                  - Client3SecurityGroupId
+                  - Client4SecurityGroupId
+                  - Client5SecurityGroupId
+                  - Client6SecurityGroupId
+                  - Client7SecurityGroupId
+                  - Client8SecurityGroupId
+                  - Client9SecurityGroupId
+                  - Client10SecurityGroupId
+            - Label:
+                  default: "RDS Parameters"
+              Parameters:
+                  - DBSnapshotIdentifier
+                  - EngineVersion
+                  - DBStorageType
+                  - DBAllocatedStorage
+                  - DBInstanceClass
+                  - DBInstanceIdentifier
+                  - DBName
+                  - DBBackupRetentionPeriod
+                  - DBMasterUsername
+                  - DBMasterUserPassword
+                  - DBMultiAZ
+                  - DBDefaultAZ
+                  - DBOptionGroupName
+                  - DBParameterGroupName
+                  - DeletionProtection
+                  - StorageEncrypted
+                  - PreferredBackupWindow
+                  - PreferredMaintenanceWindow
+                  - EnableIAMDatabaseAuthentication
+            - Label:
+                  default: "Global Tags"
+              Parameters:
+                  - ENV
+                  - SYS
 Parameters:
-  ParentVPCStack:
-    Description: 'Stack name of parent VPC stack based on vpc.yaml template.'
-    Type: String 
-  ParentKmsKeyStack:
-    Description: 'Optional Stack name of parent KMS key stack based on kms-key.yaml template (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
-    Type: String
-    Default: ''   
-  ParentSSHBastionStack:
-    Description: 'Optional but recommended stack name of parent SSH bastion host/instance stack based on bastion.yaml template.'
-    Type: String
-    Default: ''
-  ParentAlertStack:
-    Description: 'Optional but recommended stack name of parent alert stack based on alert.yaml template.'
-    Type: String
-    Default: ''
-  AppSecurityGroupId:
-    Description: 'Application security group id to connect to the db'
-    Type: String
+    ParentVPCStack:
+        Description: "Stack name of parent VPC stack based on vpc.yaml template."
+        Type: String
+    ParentKmsKeyStack:
+        Description: "Optional Stack name of parent KMS key stack based on kms-key.yaml template (ignored when DBSnapshotIdentifier is set, value used from snapshot)."
+        Type: String
+        Default: ""
+    ParentSSHBastionStack:
+        Description: "Optional but recommended stack name of parent SSH bastion host/instance stack based on bastion.yaml template."
+        Type: String
+        Default: ""
+    ParentAlertStack:
+        Description: "Optional but recommended stack name of parent alert stack based on alert.yaml template."
+        Type: String
+        Default: ""
 
-  DBStorageType:
-    Description: 'Specifies the storage type to be associated with the DB instance.'
-    Type: String
-    Default: 'gp2'
-    AllowedValues: ['standard', 'gp2','io1']
-  DBSnapshotIdentifier:
-    Description: 'Optional name or Amazon Resource Name (ARN) of the DB snapshot from which you want to restore (leave blank to create an empty database).'
-    Type: String
-    Default: ''
-  DBAllocatedStorage:
-    Description: 'The allocated storage size, specified in GB (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
-    Type: Number
-    Default: 5
-    MinValue: 5
-    MaxValue: 16384
-  DBInstanceClass:
-    Description: 'The instance type of database server.'
-    Type: String
-    Default: 'db.t3.micro'
-  DBInstanceIdentifier:
-    Description: 'Optional Unique Identifier of the database'
-    Type: String
-    Default: ''
-  DBName:
-    Description: 'Name of the database (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
-    Type: String
-    Default: ''
-  DBBackupRetentionPeriod:
-    Description: 'The number of days to keep snapshots of the database.'
-    Type: Number
-    MinValue: 0
-    MaxValue: 35
-    Default: 30
-  DBMasterUsername:
-    Description: 'The master user name for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
-    Type: String
-    Default: master
-  DBMasterUserPassword:
-    Description: 'The master password for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
-    Type: String
-    NoEcho: true
-    Default: ''
-  DBMultiAZ:
-    Description: 'Specifies if the database instance is deployed to multiple Availability Zones for HA.'
-    Type: String
-    Default: true
-    AllowedValues: [true, false]
-  DBDefaultAZ:
-    Description: 'If DB MultiAZ is false. Specify what default AZ to use'
-    Type: String
-    Default: 'a'
-    AllowedValues: ['a', 'b']
-  DBOptionGroupName:
-    Description: 'Optional name of an existing DB option group.'
-    Type: String
-    Default: ''
-  DBParameterGroupName:
-    Description: 'Optional name of an existing DB parameter group.'
-    Type: String
-    Default: '' 
-  DeletionProtection:
-    Description: 'Enable or Disable DB deletion protection'
-    Type: String
-    Default: true
-    AllowedValues: [true, false]
-  StorageEncrypted:
-    Description: 'Enable or Disable DB storage encryption. This value is ignored if DBSnapshotIdentifier or ParentKmsKeyStack is available'
-    Type: String
-    Default: true
-    AllowedValues: [true, false]
-  PreferredBackupWindow:
-    Description: 'The daily time range in UTC during which you want to create automated backups.'
-    Type: String
-    Default: '00:00-3:00'
-  PreferredMaintenanceWindow:
-    Description: The weekly time range (in UTC) during which system maintenance can occur.
-    Type: String
-    Default: 'sat:05:00-sat:07:00'
-  EngineVersion:
-    Description: 'MySQL version.'
-    Type: String
-    Default: '5.7.21'
-    AllowedValues: ['8.0.15', '5.7.25', '5.7.21', '5.6.41', '5.5.61'] # aws rds describe-db-engine-versions --engine mysql --query "DBEngineVersions[].EngineVersion"
-  EnableIAMDatabaseAuthentication:
-    Description: 'Enable mapping of AWS Identity and Access Management (IAM) accounts to database accounts (https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/UsingWithRDS.IAMDBAuth.html).'
-    Type: String
-    AllowedValues: ['true', 'false']
-    Default: 'false'
+    Client1SecurityGroupId:
+        Description: "Optional - Client 1 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client2SecurityGroupId:
+        Description: "Optional - Client 2 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client3SecurityGroupId:
+        Description: "Optional - Client 3 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client4SecurityGroupId:
+        Description: "Optional - Client 4 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client5SecurityGroupId:
+        Description: "Optional - Client 5 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client6SecurityGroupId:
+        Description: "Optional - Client 6 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client7SecurityGroupId:
+        Description: "Optional - Client 7 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client8SecurityGroupId:
+        Description: "Optional - Client 8 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client9SecurityGroupId:
+        Description: "Optional - Client 9 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
+    Client10SecurityGroupId:
+        Description: "Optional - Client 10 - Application security group id to connect to the db"
+        Type: String
+        Default: ""
 
-  ENV:
-    Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
-    Type: String
-    Default: 'dev'
-    AllowedValues:
-    - 'dev'
-    - 'staging'
-    - 'prod'
-  SYS:
-    Description: 'Specify type System the resource is associated with this Resource (backend,frontend,both)'
-    Type: String
-    AllowedValues:
-    - 'backend'
-    - 'frontend'
-    - 'both'
+    DBStorageType:
+        Description: "Specifies the storage type to be associated with the DB instance."
+        Type: String
+        Default: "gp2"
+        AllowedValues: ["standard", "gp2", "io1"]
+    DBSnapshotIdentifier:
+        Description: "Optional name or Amazon Resource Name (ARN) of the DB snapshot from which you want to restore (leave blank to create an empty database)."
+        Type: String
+        Default: ""
+    DBAllocatedStorage:
+        Description: "The allocated storage size, specified in GB (ignored when DBSnapshotIdentifier is set, value used from snapshot)."
+        Type: Number
+        Default: 5
+        MinValue: 5
+        MaxValue: 16384
+    DBInstanceClass:
+        Description: "The instance type of database server."
+        Type: String
+        Default: "db.t3.micro"
+    DBInstanceIdentifier:
+        Description: "Optional Unique Identifier of the database"
+        Type: String
+        Default: ""
+    DBName:
+        Description: "Name of the database (ignored when DBSnapshotIdentifier is set, value used from snapshot)."
+        Type: String
+        Default: ""
+    DBBackupRetentionPeriod:
+        Description: "The number of days to keep snapshots of the database."
+        Type: Number
+        MinValue: 0
+        MaxValue: 35
+        Default: 30
+    DBMasterUsername:
+        Description: "The master user name for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot)."
+        Type: String
+        Default: master
+    DBMasterUserPassword:
+        Description: "The master password for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot)."
+        Type: String
+        NoEcho: true
+        Default: ""
+    DBMultiAZ:
+        Description: "Specifies if the database instance is deployed to multiple Availability Zones for HA."
+        Type: String
+        Default: true
+        AllowedValues: [true, false]
+    DBDefaultAZ:
+        Description: "If DB MultiAZ is false. Specify what default AZ to use"
+        Type: String
+        Default: "a"
+        AllowedValues: ["a", "b"]
+    DBOptionGroupName:
+        Description: "Optional name of an existing DB option group."
+        Type: String
+        Default: ""
+    DBParameterGroupName:
+        Description: "Optional name of an existing DB parameter group."
+        Type: String
+        Default: ""
+    DeletionProtection:
+        Description: "Enable or Disable DB deletion protection"
+        Type: String
+        Default: true
+        AllowedValues: [true, false]
+    StorageEncrypted:
+        Description: "Enable or Disable DB storage encryption. This value is ignored if DBSnapshotIdentifier or ParentKmsKeyStack is available"
+        Type: String
+        Default: true
+        AllowedValues: [true, false]
+    PreferredBackupWindow:
+        Description: "The daily time range in UTC during which you want to create automated backups."
+        Type: String
+        Default: "00:00-3:00"
+    PreferredMaintenanceWindow:
+        Description: The weekly time range (in UTC) during which system maintenance can occur.
+        Type: String
+        Default: "sat:05:00-sat:07:00"
+    EngineVersion:
+        Description: "MySQL version."
+        Type: String
+        Default: "5.7.21"
+        AllowedValues: ["8.0.15", "5.7.25", "5.7.21", "5.6.41", "5.5.61"] # aws rds describe-db-engine-versions --engine mysql --query "DBEngineVersions[].EngineVersion"
+    EnableIAMDatabaseAuthentication:
+        Description: "Enable mapping of AWS Identity and Access Management (IAM) accounts to database accounts (https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/UsingWithRDS.IAMDBAuth.html)."
+        Type: String
+        AllowedValues: ["true", "false"]
+        Default: "false"
+
+    ENV:
+        Description: "Specify Environment to deploy Resource (dev,staging,prod)"
+        Type: String
+        Default: "dev"
+        AllowedValues:
+            - "dev"
+            - "staging"
+            - "prod"
+    SYS:
+        Description: "Specify type System the resource is associated with this Resource (backend,frontend,both)"
+        Type: String
+        AllowedValues:
+            - "backend"
+            - "frontend"
+            - "both"
 Conditions:
-  HasMultiAZ: !Equals [!Ref DBMultiAZ, 'true']
-  HasKmsKey: !Not [!Equals [!Ref ParentKmsKeyStack, '']]
-  HasSSHBastionSecurityGroup: !Not [!Equals [!Ref ParentSSHBastionStack, '']]
-  HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, '']]
-  HasDBSnapshotIdentifier: !Not [!Equals [!Ref DBSnapshotIdentifier, '']]
-  HasDBOptionGroupName: !Not [!Equals [!Ref DBOptionGroupName, '']]
-  HasDBParameterGroupName: !Not [!Equals [!Ref DBParameterGroupName, '']]
-  HasKmsKeyAndNotDBSnapshotIdentifier: !And [!Condition HasKmsKey, !Not [!Condition HasDBSnapshotIdentifier]]
-Resources: 
-  DatabaseSecurityGroup: 
-    Type: 'AWS::EC2::SecurityGroup'
-    Properties:
-      GroupDescription: !Ref 'AWS::StackName'
-      VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
-      SecurityGroupIngress: # APP Access
-      - IpProtocol: tcp
-        FromPort: 3306
-        ToPort: 3306
-        SourceSecurityGroupId: !Ref AppSecurityGroupId
-  DatabaseSecurityGroupInVPC:  # VPC Default Access
-    Type: 'AWS::EC2::SecurityGroupIngress'
-    Properties:
-      GroupId: !Ref DatabaseSecurityGroup
-      IpProtocol: tcp
-      FromPort: 3306
-      ToPort: 3306
-      SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-SecurityGroup'}
-  DatabaseSecurityGroupInSSHBastion:  # Bastion Host Access
-    Type: 'AWS::EC2::SecurityGroupIngress'
-    Condition: HasSSHBastionSecurityGroup
-    Properties:
-      GroupId: !Ref DatabaseSecurityGroup
-      IpProtocol: tcp
-      FromPort: 3306
-      ToPort: 3306
-      SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentSSHBastionStack}-SecurityGroup'}
+    HasMultiAZ: !Equals [!Ref DBMultiAZ, "true"]
+    HasKmsKey: !Not [!Equals [!Ref ParentKmsKeyStack, ""]]
+    HasSSHBastionSecurityGroup: !Not [!Equals [!Ref ParentSSHBastionStack, ""]]
+    HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, ""]]
+    HasDBSnapshotIdentifier: !Not [!Equals [!Ref DBSnapshotIdentifier, ""]]
+    HasDBOptionGroupName: !Not [!Equals [!Ref DBOptionGroupName, ""]]
+    HasDBParameterGroupName: !Not [!Equals [!Ref DBParameterGroupName, ""]]
+    HasKmsKeyAndNotDBSnapshotIdentifier: !And [!Condition HasKmsKey, !Not [!Condition HasDBSnapshotIdentifier]]
+    HasClient1SecurityGroupId: !Not [!Equals [!Ref Client1SecurityGroupId, ""]]
+    HasClient2SecurityGroupId: !Not [!Equals [!Ref Client2SecurityGroupId, ""]]
+    HasClient3SecurityGroupId: !Not [!Equals [!Ref Client3SecurityGroupId, ""]]
+    HasClient4SecurityGroupId: !Not [!Equals [!Ref Client4SecurityGroupId, ""]]
+    HasClient5SecurityGroupId: !Not [!Equals [!Ref Client5SecurityGroupId, ""]]
+    HasClient6SecurityGroupId: !Not [!Equals [!Ref Client6SecurityGroupId, ""]]
+    HasClient7SecurityGroupId: !Not [!Equals [!Ref Client7SecurityGroupId, ""]]
+    HasClient8SecurityGroupId: !Not [!Equals [!Ref Client8SecurityGroupId, ""]]
+    HasClient9SecurityGroupId: !Not [!Equals [!Ref Client9SecurityGroupId, ""]]
+    HasClient10SecurityGroupId: !Not [!Equals [!Ref Client10SecurityGroupId, ""]]
+Resources:
+    DatabaseSecurityGroup:
+        Type: "AWS::EC2::SecurityGroup"
+        Properties:
+            GroupDescription: !Ref "AWS::StackName"
+            VpcId: { "Fn::ImportValue": !Sub "${ParentVPCStack}-VPC" }
+            SecurityGroupIngress: # APP Access
+                - IpProtocol: tcp
+                  FromPort: 3306
+                  ToPort: 3306
+                  SourceSecurityGroupId: !Ref Client1SecurityGroupId
+    # VPC Default Access
+    DatabaseSecurityGroupInVPC:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: { "Fn::ImportValue": !Sub "${ParentVPCStack}-SecurityGroup" }
+    # Bastion Host Access
+    DatabaseSecurityGroupInSSHBastion:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasSSHBastionSecurityGroup
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: { "Fn::ImportValue": !Sub "${ParentSSHBastionStack}-SecurityGroup" }
+    
+    # Clients Access
+    DatabaseSecurityGroupInClient1:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient1SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client1SecurityGroupId
+    DatabaseSecurityGroupInClient2:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient2SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client2SecurityGroupId
+    DatabaseSecurityGroupInClient3:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient3SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client3SecurityGroupId
+    DatabaseSecurityGroupInClient4:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient4SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client4SecurityGroupId
+    DatabaseSecurityGroupInClient5:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient5SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client5SecurityGroupId
+    DatabaseSecurityGroupInClient6:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient6SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client6SecurityGroupId
+    DatabaseSecurityGroupInClient7:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient7SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client7SecurityGroupId
+    DatabaseSecurityGroupInClient8:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient8SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client8SecurityGroupId
+    DatabaseSecurityGroupInClient9:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient9SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client9SecurityGroupId
+    DatabaseSecurityGroupInClient10:
+        Type: "AWS::EC2::SecurityGroupIngress"
+        Condition: HasClient10SecurityGroupId
+        Properties:
+            GroupId: !Ref DatabaseSecurityGroup
+            IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref Client10SecurityGroupId
 
-  DBSubnetGroup:
-    Type: 'AWS::RDS::DBSubnetGroup'
-    Properties:
-      DBSubnetGroupDescription: !Ref 'AWS::StackName'
-      SubnetIds: !Split [',', {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetsPrivate'}]
-  DBInstance:
-    DeletionPolicy: Snapshot # default
-    UpdateReplacePolicy: Snapshot
-    Type: 'AWS::RDS::DBInstance'
-    Properties:
-      AllocatedStorage: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref DBAllocatedStorage]
-      AllowMajorVersionUpgrade: false
-      AutoMinorVersionUpgrade: true
-      BackupRetentionPeriod: !Ref DBBackupRetentionPeriod
-      CopyTagsToSnapshot: true
-      DBInstanceClass: !Ref DBInstanceClass
-      DBInstanceIdentifier: !Ref DBInstanceIdentifier
-      DBName: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref DBName]
-      DBParameterGroupName: !If [HasDBParameterGroupName, !Ref DBParameterGroupName, !Ref 'AWS::NoValue']
-      DBSnapshotIdentifier: !If [HasDBSnapshotIdentifier, !Ref DBSnapshotIdentifier, !Ref 'AWS::NoValue']
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      EnableIAMDatabaseAuthentication: !Ref EnableIAMDatabaseAuthentication
-      Engine: mysql
-      EngineVersion: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref EngineVersion]
-      KmsKeyId: !If [HasKmsKeyAndNotDBSnapshotIdentifier, {'Fn::ImportValue': !Sub '${ParentKmsKeyStack}-KeyId'}, !Ref 'AWS::NoValue']
-      MasterUsername: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref DBMasterUsername]
-      MasterUserPassword: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !Ref DBMasterUserPassword]
-      MultiAZ: !Ref DBMultiAZ
-      OptionGroupName: !If [HasDBOptionGroupName, !Ref DBOptionGroupName, !Ref 'AWS::NoValue']
-      PreferredBackupWindow: !Ref PreferredBackupWindow
-      PreferredMaintenanceWindow: !Ref PreferredMaintenanceWindow
-      StorageType: !Ref DBStorageType
-      DeletionProtection: !Ref DeletionProtection
-      StorageEncrypted: !If [HasDBSnapshotIdentifier, !Ref 'AWS::NoValue', !If [HasKmsKey, true, !Ref StorageEncrypted]]
-      VPCSecurityGroups:
-      - !Ref DatabaseSecurityGroup
-      AvailabilityZone: !If [HasMultiAZ, !Ref 'AWS::NoValue', !Sub "${AWS::Region}${DBDefaultAZ}"]
-      Tags:
-      - Key: ENV
-        Value: !Ref ENV
-      - Key: SYS
-        Value: !Ref SYS
-        
-  DatabaseBurstBalanceTooLowAlarm:
-    Condition: HasAlertTopic
-    Type: 'AWS::CloudWatch::Alarm'
-    Properties:
-      AlarmActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      AlarmDescription: 'Average database storage burst balance over last 10 minutes too low, expect a significant performance drop soon.'
-      ComparisonOperator: LessThanThreshold
-      Dimensions:
-      - Name: DBInstanceIdentifier
-        Value: !Ref DBInstance
-      EvaluationPeriods: 1
-      MetricName: BurstBalance
-      Namespace: 'AWS/RDS'
-      OKActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      Period: 600
-      Statistic: Average
-      Threshold: 20
-  DatabaseCPUUtilizationTooHighAlarm:
-    Condition: HasAlertTopic
-    Type: 'AWS::CloudWatch::Alarm'
-    Properties:
-      AlarmActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      AlarmDescription: 'Average database CPU utilization over last 10 minutes too high.'
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-      - Name: DBInstanceIdentifier
-        Value: !Ref DBInstance
-      EvaluationPeriods: 1
-      MetricName: CPUUtilization
-      Namespace: 'AWS/RDS'
-      OKActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      Period: 600
-      Statistic: Average
-      Threshold: 80
-  DatabaseCPUCreditBalanceTooLowAlarm:
-    Condition: HasAlertTopic
-    Type: 'AWS::CloudWatch::Alarm'
-    Properties:
-      AlarmActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      AlarmDescription: 'Average database CPU credit balance over last 10 minutes too low, expect a significant performance drop soon.'
-      ComparisonOperator: LessThanThreshold
-      Dimensions:
-      - Name: DBInstanceIdentifier
-        Value: !Ref DBInstance
-      EvaluationPeriods: 1
-      MetricName: CPUCreditBalance
-      Namespace: 'AWS/RDS'
-      OKActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      Period: 600
-      Statistic: Average
-      Threshold: 20
-  DatabaseDiskQueueDepthTooHighAlarm:
-    Condition: HasAlertTopic
-    Type: 'AWS::CloudWatch::Alarm'
-    Properties:
-      AlarmActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      AlarmDescription: 'Average database disk queue depth over last 10 minutes too high, performance may suffer.'
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-      - Name: DBInstanceIdentifier
-        Value: !Ref DBInstance
-      EvaluationPeriods: 1
-      MetricName: DiskQueueDepth
-      Namespace: 'AWS/RDS'
-      OKActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      Period: 600
-      Statistic: Average
-      Threshold: 64
-  DatabaseFreeableMemoryTooLowAlarm:
-    Condition: HasAlertTopic
-    Type: 'AWS::CloudWatch::Alarm'
-    Properties:
-      AlarmActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      AlarmDescription: 'Average database freeable memory over last 10 minutes too low, performance may suffer.'
-      ComparisonOperator: LessThanThreshold
-      Dimensions:
-      - Name: DBInstanceIdentifier
-        Value: !Ref DBInstance
-      EvaluationPeriods: 1
-      MetricName: FreeableMemory
-      Namespace: 'AWS/RDS'
-      OKActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      Period: 600
-      Statistic: Average
-      Threshold: 64000000 # 64 Megabyte in Byte
-  DatabaseFreeStorageSpaceTooLowAlarm:
-    Condition: HasAlertTopic
-    Type: 'AWS::CloudWatch::Alarm'
-    Properties:
-      AlarmActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      AlarmDescription: 'Average database free storage space over last 10 minutes too low.'
-      ComparisonOperator: LessThanThreshold
-      Dimensions:
-      - Name: DBInstanceIdentifier
-        Value: !Ref DBInstance
-      EvaluationPeriods: 1
-      MetricName: FreeStorageSpace
-      Namespace: 'AWS/RDS'
-      OKActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      Period: 600
-      Statistic: Average
-      Threshold: 2000000000 # 2 Gigabyte in Byte
-  DatabaseSwapUsageTooHighAlarm:
-    Condition: HasAlertTopic
-    Type: 'AWS::CloudWatch::Alarm'
-    Properties:
-      AlarmActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      AlarmDescription: 'Average database swap usage over last 10 minutes too high, performance may suffer.'
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-      - Name: DBInstanceIdentifier
-        Value: !Ref DBInstance
-      EvaluationPeriods: 1
-      MetricName: SwapUsage
-      Namespace: 'AWS/RDS'
-      OKActions:
-      - {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      Period: 600
-      Statistic: Average
-      Threshold: 256000000 # 256 Megabyte in Byte
-  DatabaseEventSubscription:
-    Condition: HasAlertTopic
-    Type: 'AWS::RDS::EventSubscription'
-    Properties:
-      EventCategories:
-      - failover
-      - failure
-      - 'low storage'
-      - maintenance
-      - 'read replica'
-      - recovery
-      SnsTopicArn: {'Fn::ImportValue': !Sub '${ParentAlertStack}-TopicARN'}
-      SourceIds: [!Ref DBInstance]
-      SourceType: 'db-instance'
+    DBSubnetGroup:
+        Type: "AWS::RDS::DBSubnetGroup"
+        Properties:
+            DBSubnetGroupDescription: !Ref "AWS::StackName"
+            SubnetIds: !Split [",", { "Fn::ImportValue": !Sub "${ParentVPCStack}-SubnetsPrivate" }]
+    DBInstance:
+        DeletionPolicy: Snapshot # default
+        UpdateReplacePolicy: Snapshot
+        Type: "AWS::RDS::DBInstance"
+        Properties:
+            AllocatedStorage: !If [HasDBSnapshotIdentifier, !Ref "AWS::NoValue", !Ref DBAllocatedStorage]
+            AllowMajorVersionUpgrade: false
+            AutoMinorVersionUpgrade: true
+            BackupRetentionPeriod: !Ref DBBackupRetentionPeriod
+            CopyTagsToSnapshot: true
+            DBInstanceClass: !Ref DBInstanceClass
+            DBInstanceIdentifier: !Ref DBInstanceIdentifier
+            DBName: !If [HasDBSnapshotIdentifier, !Ref "AWS::NoValue", !Ref DBName]
+            DBParameterGroupName: !If [HasDBParameterGroupName, !Ref DBParameterGroupName, !Ref "AWS::NoValue"]
+            DBSnapshotIdentifier: !If [HasDBSnapshotIdentifier, !Ref DBSnapshotIdentifier, !Ref "AWS::NoValue"]
+            DBSubnetGroupName: !Ref DBSubnetGroup
+            EnableIAMDatabaseAuthentication: !Ref EnableIAMDatabaseAuthentication
+            Engine: mysql
+            EngineVersion: !If [HasDBSnapshotIdentifier, !Ref "AWS::NoValue", !Ref EngineVersion]
+            KmsKeyId:
+                !If [
+                    HasKmsKeyAndNotDBSnapshotIdentifier,
+                    { "Fn::ImportValue": !Sub "${ParentKmsKeyStack}-KeyId" },
+                    !Ref "AWS::NoValue",
+                ]
+            MasterUsername: !If [HasDBSnapshotIdentifier, !Ref "AWS::NoValue", !Ref DBMasterUsername]
+            MasterUserPassword: !If [HasDBSnapshotIdentifier, !Ref "AWS::NoValue", !Ref DBMasterUserPassword]
+            MultiAZ: !Ref DBMultiAZ
+            OptionGroupName: !If [HasDBOptionGroupName, !Ref DBOptionGroupName, !Ref "AWS::NoValue"]
+            PreferredBackupWindow: !Ref PreferredBackupWindow
+            PreferredMaintenanceWindow: !Ref PreferredMaintenanceWindow
+            StorageType: !Ref DBStorageType
+            DeletionProtection: !Ref DeletionProtection
+            StorageEncrypted:
+                !If [HasDBSnapshotIdentifier, !Ref "AWS::NoValue", !If [HasKmsKey, true, !Ref StorageEncrypted]]
+            VPCSecurityGroups:
+                - !Ref DatabaseSecurityGroup
+            AvailabilityZone: !If [HasMultiAZ, !Ref "AWS::NoValue", !Sub "${AWS::Region}${DBDefaultAZ}"]
+            Tags:
+                - Key: ENV
+                  Value: !Ref ENV
+                - Key: SYS
+                  Value: !Ref SYS
+
+    DatabaseBurstBalanceTooLowAlarm:
+        Condition: HasAlertTopic
+        Type: "AWS::CloudWatch::Alarm"
+        Properties:
+            AlarmActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            AlarmDescription: "Average database storage burst balance over last 10 minutes too low, expect a significant performance drop soon."
+            ComparisonOperator: LessThanThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Ref DBInstance
+            EvaluationPeriods: 1
+            MetricName: BurstBalance
+            Namespace: "AWS/RDS"
+            OKActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            Period: 600
+            Statistic: Average
+            Threshold: 20
+    DatabaseCPUUtilizationTooHighAlarm:
+        Condition: HasAlertTopic
+        Type: "AWS::CloudWatch::Alarm"
+        Properties:
+            AlarmActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            AlarmDescription: "Average database CPU utilization over last 10 minutes too high."
+            ComparisonOperator: GreaterThanThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Ref DBInstance
+            EvaluationPeriods: 1
+            MetricName: CPUUtilization
+            Namespace: "AWS/RDS"
+            OKActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            Period: 600
+            Statistic: Average
+            Threshold: 80
+    DatabaseCPUCreditBalanceTooLowAlarm:
+        Condition: HasAlertTopic
+        Type: "AWS::CloudWatch::Alarm"
+        Properties:
+            AlarmActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            AlarmDescription: "Average database CPU credit balance over last 10 minutes too low, expect a significant performance drop soon."
+            ComparisonOperator: LessThanThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Ref DBInstance
+            EvaluationPeriods: 1
+            MetricName: CPUCreditBalance
+            Namespace: "AWS/RDS"
+            OKActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            Period: 600
+            Statistic: Average
+            Threshold: 20
+    DatabaseDiskQueueDepthTooHighAlarm:
+        Condition: HasAlertTopic
+        Type: "AWS::CloudWatch::Alarm"
+        Properties:
+            AlarmActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            AlarmDescription: "Average database disk queue depth over last 10 minutes too high, performance may suffer."
+            ComparisonOperator: GreaterThanThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Ref DBInstance
+            EvaluationPeriods: 1
+            MetricName: DiskQueueDepth
+            Namespace: "AWS/RDS"
+            OKActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            Period: 600
+            Statistic: Average
+            Threshold: 64
+    DatabaseFreeableMemoryTooLowAlarm:
+        Condition: HasAlertTopic
+        Type: "AWS::CloudWatch::Alarm"
+        Properties:
+            AlarmActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            AlarmDescription: "Average database freeable memory over last 10 minutes too low, performance may suffer."
+            ComparisonOperator: LessThanThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Ref DBInstance
+            EvaluationPeriods: 1
+            MetricName: FreeableMemory
+            Namespace: "AWS/RDS"
+            OKActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            Period: 600
+            Statistic: Average
+            Threshold: 64000000 # 64 Megabyte in Byte
+    DatabaseFreeStorageSpaceTooLowAlarm:
+        Condition: HasAlertTopic
+        Type: "AWS::CloudWatch::Alarm"
+        Properties:
+            AlarmActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            AlarmDescription: "Average database free storage space over last 10 minutes too low."
+            ComparisonOperator: LessThanThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Ref DBInstance
+            EvaluationPeriods: 1
+            MetricName: FreeStorageSpace
+            Namespace: "AWS/RDS"
+            OKActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            Period: 600
+            Statistic: Average
+            Threshold: 2000000000 # 2 Gigabyte in Byte
+    DatabaseSwapUsageTooHighAlarm:
+        Condition: HasAlertTopic
+        Type: "AWS::CloudWatch::Alarm"
+        Properties:
+            AlarmActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            AlarmDescription: "Average database swap usage over last 10 minutes too high, performance may suffer."
+            ComparisonOperator: GreaterThanThreshold
+            Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Ref DBInstance
+            EvaluationPeriods: 1
+            MetricName: SwapUsage
+            Namespace: "AWS/RDS"
+            OKActions:
+                - { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            Period: 600
+            Statistic: Average
+            Threshold: 256000000 # 256 Megabyte in Byte
+    DatabaseEventSubscription:
+        Condition: HasAlertTopic
+        Type: "AWS::RDS::EventSubscription"
+        Properties:
+            EventCategories:
+                - failover
+                - failure
+                - "low storage"
+                - maintenance
+                - "read replica"
+                - recovery
+            SnsTopicArn: { "Fn::ImportValue": !Sub "${ParentAlertStack}-TopicARN" }
+            SourceIds: [!Ref DBInstance]
+            SourceType: "db-instance"
 Outputs:
-  TemplateID:
-    Description: 'AWS Cloud Formation template id'
-    Value: 'rds-mysql'
-  TemplateVersion:
-    Description: 'AWS Cloud Formation template version.'
-    Value: '1.0'
-  StackName:
-    Description: 'Stack name.'
-    Value: !Sub '${AWS::StackName}'
-    Export:
-      Name: !Sub '${AWS::StackName}-StackName'
-  InstanceName:
-    Description: 'The name of the database instance.'
-    Value: !Ref DBInstance
-    Export:
-      Name: !Sub '${AWS::StackName}-InstanceName'
-  DNSName:
-    Description: 'The connection endpoint for the database.'
-    Value: !GetAtt 'DBInstance.Endpoint.Address'
-    Export:
-      Name: !Sub '${AWS::StackName}-DNSName'
+    TemplateID:
+        Description: "AWS Cloud Formation template id"
+        Value: "rds-mysql"
+    TemplateVersion:
+        Description: "AWS Cloud Formation template version."
+        Value: "1.0"
+    StackName:
+        Description: "Stack name."
+        Value: !Sub "${AWS::StackName}"
+        Export:
+            Name: !Sub "${AWS::StackName}-StackName"
+    InstanceName:
+        Description: "The name of the database instance."
+        Value: !Ref DBInstance
+        Export:
+            Name: !Sub "${AWS::StackName}-InstanceName"
+    DNSName:
+        Description: "The connection endpoint for the database."
+        Value: !GetAtt "DBInstance.Endpoint.Address"
+        Export:
+            Name: !Sub "${AWS::StackName}-DNSName"
