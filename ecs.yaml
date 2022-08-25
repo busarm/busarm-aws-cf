@@ -693,7 +693,11 @@ Resources:
           - - "#!/bin/bash -x\n"
             - 'yum update -y'
             - "\n"
+            - 'yum install gcc-c++ make'
+            - "\n"
             - 'yum install -y nano'
+            - "\n"
+            - 'yum install -y git'
             - "\n"
             - !If
               - HasLogzio

@@ -982,14 +982,14 @@ Resources:
 
     # Add VPC SHH Access to allow SSH from within VPC
     SecurityGroupInVPC:
-        Type: 'AWS::EC2::SecurityGroupIngress'
+        Type: "AWS::EC2::SecurityGroupIngress"
         Properties:
             GroupId: !Ref SecurityGroup
             IpProtocol: tcp
             FromPort: 22
             ToPort: 22
-            SourceSecurityGroupId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-SecurityGroup'}
-            
+            SourceSecurityGroupId: { "Fn::ImportValue": !Sub "${ParentVPCStack}-SecurityGroup" }
+
     # Add access to public if Public Subnet available
     SecurityGroupInHTTPWorldIPv4:
         Type: "AWS::EC2::SecurityGroupIngress"
@@ -1124,6 +1124,7 @@ Resources:
                           - "iam:GetSSHPublicKey"
                       Resource:
                           - !Sub "arn:aws:iam::${AWS::AccountId}:user/*"
+
     VirtualMachine: # TODO make IMDSv2 required (waits for https://github.com/aws-cloudformation/aws-cloudformation-coverage-roadmap/issues/655)
         Type: "AWS::EC2::Instance"
         Metadata:
@@ -1414,12 +1415,34 @@ Resources:
                 - DeviceIndex: "0"
                   NetworkInterfaceId: !Ref NetworkInterface
             UserData:
-                "Fn::Base64": !Sub |
-                    #!/bin/bash -ex
-                    trap '/opt/aws/bin/cfn-signal -e 1 --region ${AWS::Region} --stack ${AWS::StackName} --resource VirtualMachine' ERR
-                    ${UserData}
-                    /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource VirtualMachine --region ${AWS::Region}
-                    /opt/aws/bin/cfn-signal -e 0 --region ${AWS::Region} --stack ${AWS::StackName} --resource VirtualMachine
+                Fn::Base64:
+                    Fn::Join:
+                        - ""
+                        - - "#!/bin/bash -x"
+                          - "\n"
+                          - "echo '[USER DATA] - Started' >> /var/log/boot.log"
+                          - "\n"
+                          - "yum update -y"
+                          - "\n"
+                          - "yum install -y curl"
+                          - "\n"
+                          - "yum install gcc-c++ make"
+                          - "\n"
+                          - "yum install -y nano"
+                          - "\n"
+                          - "yum install -y git"
+                          - "\n"
+                          - "echo '[USER DATA] - Completed installation' >> /var/log/boot.log"
+                          - "\n"
+                          - !Sub |
+                              #!/bin/bash -ex
+                              trap '/opt/aws/bin/cfn-signal -e 1 --region ${AWS::Region} --stack ${AWS::StackName} --resource VirtualMachine' ERR
+                              echo '[USER DATA] - Running custom user data commands' >> /var/log/boot.log
+                              ${UserData}
+                              echo '[USER DATA] - Completed custom user data commands' >> /var/log/boot.log
+                              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource VirtualMachine --region ${AWS::Region}
+                              /opt/aws/bin/cfn-signal -e 0 --region ${AWS::Region} --stack ${AWS::StackName} --resource VirtualMachine
+                              echo '[USER DATA] - Completed execution' >> /var/log/boot.log
 
             Tags:
                 - Key: Name
@@ -1435,6 +1458,14 @@ Resources:
             ResourceSignal:
                 Count: 1
                 Timeout: PT10M
+
+    # Elastic IP
+    EIP:
+        Type: "AWS::EC2::EIP"
+        Properties:
+            Domain: vpc
+            InstanceId: !Ref VirtualMachine
+
     RecoveryAlarm:
         Type: "AWS::CloudWatch::Alarm"
         Properties:
@@ -1647,11 +1678,11 @@ Resources:
                 SelectionName: !Ref "AWS::StackName"
 Outputs:
     TemplateID:
-        Description: 'AWS Cloud Formation template id'
-        Value: 'ec2'
+        Description: "AWS Cloud Formation template id"
+        Value: "ec2"
     TemplateVersion:
-        Description: 'AWS Cloud Formation template version.'
-        Value: '1.0'
+        Description: "AWS Cloud Formation template version."
+        Value: "1.0"
     StackName:
         Description: "Stack name."
         Value: !Sub "${AWS::StackName}"

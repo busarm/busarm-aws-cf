@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Content Delivery: Cloudfront Distribution with custom origin dpmain'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'Cloudfront Properties'
+      Parameters:
+      - OriginId 
+      - OriginDomain 
+      - OriginProtocolPolicy 
+      - CacheDefaultTTL
+      - CacheMaxTTL
+      - CacheMinTTL
+    - Label:
+        default: 'Global Tags'
+      Parameters:
+      - ENV
+      - SYS
+Parameters:
+  OriginId:
+    Description: 'Custom id for your origin. e.g myapp-v1'
+    Type: String
+  OriginDomain:
+    Description: 'Domain name to your service. e.g v1.myapp.com'
+    Type: String
+  OriginProtocolPolicy:
+    Description: 'What protocol to connect to origin url. http only, https only or same protocol as viewer'
+    Type: String 
+    Default: 'http-only'
+    AllowedValues:
+    - 'http-only'
+    - 'https-only'
+    - 'match-viewer'
+
+  CacheDefaultTTL:
+    Description: 'Cache Default TTL in seconds'
+    Type: Number
+    Default: 3600
+    MinValue: 0
+  CacheMaxTTL:
+    Description: 'Cache Maximum TTL in seconds'
+    Type: Number
+    Default: 86400
+    MinValue: 0
+  CacheMinTTL:
+    Description: 'Cache Minimum TTL in seconds'
+    Type: Number
+    Default: 0
+    MinValue: 0
+    
+  ENV:
+    Description: 'Specify Environment to deploy Resource (dev,staging,prod)'
+    Type: String
+    Default: 'dev'
+    AllowedValues:
+    - 'dev'
+    - 'staging'
+    - 'prod'
+  SYS:
+    Description: 'Specify type System the resource is associated with this Resource (backend,frontend,both)'
+    Type: String
+    AllowedValues:
+    - 'backend'
+    - 'frontend'
+    - 'both'
+  
+Resources:
+
+  CloudFrontDistribution:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        Origins:
+        - DomainName: !Ref OriginDomain
+          Id: !Ref OriginId
+          CustomOriginConfig:
+            OriginProtocolPolicy: !Ref OriginProtocolPolicy
+            OriginReadTimeout: 60
+        DefaultCacheBehavior:
+          AllowedMethods:
+          - DELETE
+          - GET
+          - HEAD
+          - OPTIONS
+          - PATCH
+          - POST
+          - PUT
+          DefaultTTL: !Ref CacheDefaultTTL
+          MaxTTL: !Ref CacheMaxTTL
+          MinTTL: !Ref CacheMinTTL
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: all
+          TargetOriginId: !Ref OriginId
+          ViewerProtocolPolicy: 'redirect-to-https'
+          Compress: true
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        PriceClass: 'PriceClass_All'
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+      Tags:
+      - Key: ENV
+        Value: !Ref ENV
+      - Key: SYS
+        Value: !Ref SYS
+Outputs:
+  TemplateID:
+    Description: 'AWS Cloud Formation template id'
+    Value: 'cdn-alb'
+  TemplateVersion:
+    Description: 'AWS Cloud Formation template version.'
+    Value: '1.0'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+
+  CloudFrontID:
+    Description: 'The ID of the CloudFront distribution.'
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontARN'
+  CloudFrontDomainName:
+    Description: 'The domain name of the CloudFront distribution.'
+    Value: !Sub ${CloudFrontDistribution.DomainName}
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDomainName'

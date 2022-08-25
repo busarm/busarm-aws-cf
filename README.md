@@ -4,6 +4,7 @@ Based on [Cloudonaut](https://cloudonaut.io) templates
 - *alert.yaml*  - SNS Notification for AWS Infrastructure alerts
 - *alb.yaml* - Application Load Balance
 - *bastion.yaml* - Bastion Host (EC2 Instances in Auto Scaling Group)
+- *cdn-custom.yaml* - Content Delivery: Cloudfront Distribution with custom origin dpmain
 - *cdn-alb.yaml* - Cloudfront Distribution Network with Application Load Balancer as origin
 - *cdn-s3.yaml* - Cloudfront Distribution Network with S3 Bucket as origin (Using S3 Cloudformation Stack)
 - *cdn-s3-bucket.yaml* - Cloudfront Distribution Network with S3 Bucket as origin (using S3 Bucket Name)
@@ -11,6 +12,7 @@ Based on [Cloudonaut](https://cloudonaut.io) templates
 - *cicd-build-vpc-ext* - CI/CD - Build only with VPC support from external source like Github
 - *cicd-deploy-vpc-ext-ecs-bg* - CI/CD - Build & Deploy (Blue/Green) to ECS with VPC support from external source like Github
 - *cicd-deploy-vpc-ext-ecs* - CI/CD - Build & Deploy (Rolling) to ECS with VPC support from external source like Github
+- *ec2.yaml* - EC2: Amazon Linux 2
 - *ecs.yaml* - ECS Cluster of EC2 instances in an Auto Scaling Group
 - *ecs-efs.yaml* - ECS Cluster of EC2 instances in an Auto Scaling Group With EFS for Code storage
 - *ecs-service.yaml* - ECS Service Rolling Update Deployment
